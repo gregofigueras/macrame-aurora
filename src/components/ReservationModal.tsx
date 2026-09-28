@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import type { Workshop, Reservation, DepositStatus, PaymentMethod } from '../types';
+import React, { useState } from 'react';
+import type { Workshop, Reservation, DepositStatus, PaymentMethod, Client } from '../types';
 import { useData } from '../context/DataContext';
 import { formatCurrency, formatDateLong, createWhatsAppWorkshopLink } from '../utils/formatters';
 import { exportWorkshopAttendeesToCSV } from '../utils/exportCsv';
@@ -17,11 +17,8 @@ import {
   Trash2, 
   Download, 
   Check, 
-  Phone,
-  Search
+  Phone
 } from 'lucide-react';
-
-
 
 interface ReservationModalProps {
   workshop: Workshop | null;
@@ -36,22 +33,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 }) => {
   const { clients, addReservation, updateReservation, deleteReservation } = useData();
 
-  const [mode, setMode] = useState<'new' | 'existing'>('new');
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // Form states for new reservation
   const [clientName, setClientName] = useState('');
@@ -61,6 +42,35 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const [depositAmount, setDepositAmount] = useState<string>('');
   const [depositPaymentMethod, setDepositPaymentMethod] = useState<PaymentMethod>('Transferencia');
   const [notes, setNotes] = useState('');
+
+  // Matching clients based on what's typed in clientName
+  const cleanTypedName = clientName.toLowerCase().trim();
+  const matchingClients = cleanTypedName
+    ? clients.filter(c =>
+        c.name.toLowerCase().includes(cleanTypedName) ||
+        c.phone.replace(/\D/g, '').includes(cleanTypedName.replace(/\D/g, ''))
+      )
+    : clients.slice(0, 5);
+
+  const matchedClient = clients.find(
+    c => c.name.toLowerCase().trim() === cleanTypedName && cleanTypedName.length > 0
+  );
+
+  const handleClientNameChange = (nameVal: string) => {
+    setClientName(nameVal);
+    const exact = clients.find(c => c.name.toLowerCase().trim() === nameVal.toLowerCase().trim());
+    if (exact) {
+      setClientPhone(exact.phone);
+      if (exact.email) setClientEmail(exact.email);
+    }
+  };
+
+  const handleSelectClient = (c: Client) => {
+    setClientName(c.name);
+    setClientPhone(c.phone);
+    if (c.email) setClientEmail(c.email);
+  };
+
 
   // Quick edit deposit modal/state for an attendee
   const [editingDepositResId, setEditingDepositResId] = useState<string | null>(null);
@@ -128,7 +138,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
       setClientEmail('');
       setDepositAmount('');
       setNotes('');
-      setSelectedClientId('');
       setTimeout(() => setSuccessMessage(null), 3000);
     } else {
       setErrorMessage(result.message);
@@ -241,143 +250,83 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 )}
               </div>
 
-              {/* Mode Toggle: Existing vs New */}
-              <div className="grid grid-cols-2 p-1 bg-[#EFE7DE] rounded-xl mb-3 text-xs font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setMode('new')}
-                  className={`py-1.5 rounded-lg transition-all ${
-                    mode === 'new' ? 'bg-white text-[#2D231E] shadow-2xs' : 'text-[#7D6E63] hover:text-[#2D231E]'
-                  }`}
-                >
-                  Nueva Persona
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('existing')}
-                  className={`py-1.5 rounded-lg transition-all ${
-                    mode === 'existing' ? 'bg-white text-[#2D231E] shadow-2xs' : 'text-[#7D6E63] hover:text-[#2D231E]'
-                  }`}
-                >
-                  Persona Ya Registrada
-                </button>
-              </div>
-
-              {/* Existing Client Searchable Picker */}
-              {mode === 'existing' && (
-                <div className="mb-3 relative" ref={dropdownRef}>
-                  <label className="block text-[11px] font-bold text-[#5C4F47] mb-1">
-                    Buscar en la Base de Contactos
-                  </label>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
-                    <input
-                      type="text"
-                      placeholder="Escribe para buscar (ej: Valen, 11 45)..."
-                      value={searchQuery}
-                      onChange={(e) => {
-                        setSearchQuery(e.target.value);
-                        setIsDropdownOpen(true);
-                      }}
-                      onFocus={() => setIsDropdownOpen(true)}
-                      className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
-                    />
-                    {searchQuery && (
+              <form onSubmit={handleAddReservationSubmit} className="space-y-3 text-xs">
+                
+                {/* Nombre y Apellido con Datalist y Chips */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-[#5C4F47]">
+                      Nombre y Apellido del Alumno *
+                    </label>
+                    {(clientName || clientPhone) && (
                       <button
                         type="button"
                         onClick={() => {
-                          setSearchQuery('');
-                          setSelectedClientId('');
                           setClientName('');
                           setClientPhone('');
                           setClientEmail('');
                         }}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#A8988D] hover:text-[#2D231E]"
+                        className="text-[11px] text-[#C86D51] hover:underline font-semibold"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        Limpiar
                       </button>
                     )}
                   </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      list="clients-datalist-reservations"
+                      placeholder="Ingresa el nombre (ej: Valentina Gomez)..."
+                      value={clientName}
+                      onChange={(e) => handleClientNameChange(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
+                    />
+                    <datalist id="clients-datalist-reservations">
+                      {clients.map(c => (
+                        <option key={c.id} value={c.name}>
+                          {c.phone}
+                        </option>
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
 
-                  {isDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl border border-[#DFCBB9] shadow-xl max-h-48 overflow-y-auto z-50 divide-y divide-[#F2ECE4]">
-                      {clients.filter(c => {
-                        if (!searchQuery.trim()) return true;
-                        const q = searchQuery.toLowerCase().trim();
-                        const cleanQ = q.replace(/\D/g, '');
-                        const cleanPhone = c.phone.replace(/\D/g, '');
-                        return c.name.toLowerCase().includes(q) || (cleanQ.length > 2 && cleanPhone.includes(cleanQ));
-                      }).length > 0 ? (
-                        <>
-                          <div className="px-3 py-1.5 text-[10px] font-bold text-[#8E7E73] bg-[#FAF7F2] uppercase tracking-wider flex items-center justify-between">
-                            <span>{searchQuery.trim() ? 'Coincidencias' : `Contactos (${clients.length})`}</span>
-                            <span className="text-[9px] font-normal lowercase">click para elegir</span>
-                          </div>
-                          {clients.filter(c => {
-                            if (!searchQuery.trim()) return true;
-                            const q = searchQuery.toLowerCase().trim();
-                            const cleanQ = q.replace(/\D/g, '');
-                            const cleanPhone = c.phone.replace(/\D/g, '');
-                            return c.name.toLowerCase().includes(q) || (cleanQ.length > 2 && cleanPhone.includes(cleanQ));
-                          }).map(c => (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedClientId(c.id);
-                                setClientName(c.name);
-                                setClientPhone(c.phone);
-                                setClientEmail(c.email || '');
-                                setSearchQuery(c.name);
-                                setIsDropdownOpen(false);
-                              }}
-                              className="w-full text-left px-3 py-2 hover:bg-[#FAF3EA] transition-colors flex items-center justify-between group"
-                            >
-                              <div>
-                                <p className="font-bold text-xs text-[#2D231E] group-hover:text-[#C86D51]">
-                                  {c.name}
-                                </p>
-                                <p className="text-[11px] text-[#7D6E63] flex items-center gap-1">
-                                  <Phone className="w-2.5 h-2.5 text-[#8E7E73]" />
-                                  {c.phone}
-                                </p>
-                              </div>
-                              {selectedClientId === c.id && (
-                                <span className="flex items-center gap-1 text-[11px] font-bold text-[#2E7D32]">
-                                  <Check className="w-3.5 h-3.5" />
-                                  Elegido
-                                </span>
-                              )}
-                            </button>
-                          ))}
-                        </>
-                      ) : (
-                        <div className="p-3 text-center text-xs text-[#8E7E73]">
-                          No hay contactos con "{searchQuery}".
-                        </div>
-                      )}
+                {/* Nombres disponibles que coinciden */}
+                {matchingClients.length > 0 && !matchedClient && (
+                  <div className="space-y-1.5 pt-0.5">
+                    <p className="text-[10px] font-bold text-[#8E7E73] uppercase tracking-wider">
+                      {clientName.trim()
+                        ? `Nombres que coinciden con "${clientName}":`
+                        : 'O selecciona un alumno registrado:'}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                      {matchingClients.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => handleSelectClient(c)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-[#FAF3EA] text-[#2D231E] hover:text-[#C86D51] border border-[#DFCBB9] shadow-2xs transition-all hover:scale-[1.02] active:scale-98"
+                        >
+                          <span>{c.name}</span>
+                          <span className="text-[10px] text-[#8E7E73]">({c.phone})</span>
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
 
+                {/* Alumno confirmado */}
+                {matchedClient && (
+                  <div className="flex items-center justify-between text-[11px] text-[#2E7D32] bg-[#E8F5E9] px-3 py-1.5 rounded-xl font-medium border border-[#C8E6C9]">
+                    <div className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      <span>Alumno registrado: <b>{matchedClient.name}</b></span>
+                    </div>
+                    <span className="text-[10px] text-[#2E7D32]/80">Tel: {matchedClient.phone}</span>
+                  </div>
+                )}
 
-              <form onSubmit={handleAddReservationSubmit} className="space-y-3 text-xs">
-                
-                {/* Nombre y Apellido */}
-                <div>
-                  <label className="block font-bold text-[#5C4F47] mb-1">
-                    Nombre y Apellido *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej: Valentina Gomez"
-                    value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
-                  />
-                </div>
 
                 {/* Teléfono */}
                 <div>

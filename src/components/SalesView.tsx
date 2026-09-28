@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import type { Sale, ProductCategory, PaymentMethod } from '../types';
+import type { Sale, ProductCategory, PaymentMethod, Client } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { exportSalesToCSV } from '../utils/exportCsv';
 import { 
@@ -53,11 +53,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
 
-  // Searchable client state in modal
-  const [clientSearchQuery, setClientSearchQuery] = useState('');
-  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
-  const clientDropdownRef = useRef<HTMLDivElement>(null);
-
   // Form state
   const [formData, setFormData] = useState<{
     productName: string;
@@ -81,21 +76,8 @@ export const SalesView: React.FC<SalesViewProps> = ({
     notes: '',
   });
 
-  // Close dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
-        setIsClientDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   const handleOpenCreate = () => {
     setEditingSale(null);
-    setClientSearchQuery('');
-    setIsClientDropdownOpen(false);
     setFormData({
       productName: '',
       category: 'Canastas',
@@ -112,8 +94,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleOpenEdit = (sale: Sale) => {
     setEditingSale(sale);
-    setClientSearchQuery(sale.customerName || '');
-    setIsClientDropdownOpen(false);
     setFormData({
       productName: sale.productName,
       category: sale.category,
@@ -126,6 +106,24 @@ export const SalesView: React.FC<SalesViewProps> = ({
       notes: sale.notes || '',
     });
     setIsModalOpen(true);
+  };
+
+  const handleCustomerNameChange = (nameVal: string) => {
+    // If the entered name matches an existing client exactly, auto-fill phone
+    const exact = clients.find(c => c.name.toLowerCase().trim() === nameVal.toLowerCase().trim());
+    setFormData(prev => ({
+      ...prev,
+      customerName: nameVal,
+      customerPhone: exact ? exact.phone : prev.customerPhone,
+    }));
+  };
+
+  const handleSelectClient = (client: Client) => {
+    setFormData(prev => ({
+      ...prev,
+      customerName: client.name,
+      customerPhone: client.phone,
+    }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -185,14 +183,18 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const totalFilteredSales = filteredSales.reduce((acc, curr) => acc + curr.totalAmount, 0);
 
-  // Filtered clients for customer auto-search
-  const matchingClients = clients.filter(c => {
-    if (!clientSearchQuery.trim()) return true;
-    const q = clientSearchQuery.toLowerCase().trim();
-    const cleanQ = q.replace(/\D/g, '');
-    const cleanPhone = c.phone.replace(/\D/g, '');
-    return c.name.toLowerCase().includes(q) || (cleanQ.length > 2 && cleanPhone.includes(cleanQ));
-  });
+  // Matching clients based on what's typed in customerName
+  const cleanTypedName = formData.customerName.toLowerCase().trim();
+  const matchingClients = cleanTypedName
+    ? clients.filter(c =>
+        c.name.toLowerCase().includes(cleanTypedName) ||
+        c.phone.replace(/\D/g, '').includes(cleanTypedName.replace(/\D/g, ''))
+      )
+    : clients.slice(0, 6);
+
+  const matchedClient = clients.find(
+    c => c.name.toLowerCase().trim() === cleanTypedName && cleanTypedName.length > 0
+  );
 
   // Group amounts by category for quick overview
   const categoryTotals: Record<string, number> = {};
@@ -459,7 +461,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 </div>
               </div>
 
-              {/* Precio Unitario y Medio de Cobro (Costo de materiales removido según solicitud) */}
+              {/* Precio Unitario y Medio de Cobro */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-[#5C4F47] mb-1">
@@ -509,120 +511,87 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 />
               </div>
 
-              {/* Datos de la Compradora con Buscador Interactivo por Letras */}
-              <div className="p-3.5 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3" ref={clientDropdownRef}>
+              {/* Datos de la Compradora con Datalist y Selección Dinámica de Nombres */}
+              <div className="p-3.5 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="font-bold text-[#5C4F47] flex items-center gap-1.5">
+                  <label className="font-bold text-[#5C4F47] text-xs flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-[#C86D51]" />
                     <span>Datos de la Compradora / Cliente</span>
                   </label>
                   {(formData.customerName || formData.customerPhone) && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }));
-                        setClientSearchQuery('');
-                      }}
-                      className="text-[11px] text-[#C86D51] hover:underline font-semibold flex items-center gap-1"
+                      onClick={() => setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }))}
+                      className="text-[11px] text-[#C86D51] hover:underline font-semibold"
                     >
-                      <X className="w-3 h-3" />
                       Limpiar
                     </button>
                   )}
                 </div>
 
-                {/* Input con Buscador Interactivo */}
-                <div className="relative">
-                  <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
-                    Buscar o escribir nombre de la compradora:
-                  </label>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
-                    <input
-                      type="text"
-                      placeholder="Escribe para buscar (ej: Valen, Camila) o escribe un nombre nuevo..."
-                      value={clientSearchQuery}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setClientSearchQuery(val);
-                        setFormData(prev => ({ ...prev, customerName: val }));
-                        setIsClientDropdownOpen(true);
-                      }}
-                      onFocus={() => setIsClientDropdownOpen(true)}
-                      className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
-                    />
-                    {clientSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setClientSearchQuery('');
-                          setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }));
-                        }}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#A8988D] hover:text-[#2D231E]"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Dropdown flotante con coincidencias al escribir */}
-                  {isClientDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl border border-[#DFCBB9] shadow-xl max-h-48 overflow-y-auto z-50 divide-y divide-[#F2ECE4]">
-                      {matchingClients.length > 0 ? (
-                        <>
-                          <div className="px-3 py-1.5 text-[10px] font-bold text-[#8E7E73] bg-[#FAF7F2] uppercase tracking-wider flex items-center justify-between">
-                            <span>{clientSearchQuery.trim() ? `Coincidencias (${matchingClients.length})` : `Contactos Registrados (${clients.length})`}</span>
-                            <span className="text-[9px] font-normal lowercase">click para elegir</span>
-                          </div>
-                          {matchingClients.map(c => (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => {
-                                setFormData(prev => ({
-                                  ...prev,
-                                  customerName: c.name,
-                                  customerPhone: c.phone
-                                }));
-                                setClientSearchQuery(c.name);
-                                setIsClientDropdownOpen(false);
-                              }}
-                              className="w-full text-left px-3 py-2 hover:bg-[#FAF3EA] transition-colors flex items-center justify-between group"
-                            >
-                              <div>
-                                <p className="font-bold text-xs text-[#2D231E] group-hover:text-[#C86D51]">
-                                  {c.name}
-                                </p>
-                                <p className="text-[11px] text-[#7D6E63] flex items-center gap-1">
-                                  <Phone className="w-2.5 h-2.5 text-[#8E7E73]" />
-                                  {c.phone}
-                                </p>
-                              </div>
-                              {formData.customerName === c.name && (
-                                <span className="flex items-center gap-1 text-[11px] font-bold text-[#2E6B4A]">
-                                  <Check className="w-3.5 h-3.5" />
-                                  Elegida
-                                </span>
-                              )}
-                            </button>
-                          ))}
-                        </>
-                      ) : (
-                        <div className="p-3 text-center text-xs text-[#8E7E73]">
-                          <p>No hay contactos previos que coincidan con "<b>{clientSearchQuery}</b>".</p>
-                          <p className="text-[11px] text-[#C86D51] font-semibold mt-1">
-                            Se registrará automáticamente como nueva clienta al guardar.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Teléfono de la Compradora */}
+                {/* Input de Nombre con Datalist integrado */}
                 <div>
                   <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
-                    Teléfono de contacto (Opcional):
+                    Nombre y Apellido
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      list="clients-datalist-sales"
+                      placeholder="Ingresa el nombre (ej: Valentina Gomez)..."
+                      value={formData.customerName}
+                      onChange={(e) => handleCustomerNameChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                    />
+                    <datalist id="clients-datalist-sales">
+                      {clients.map(c => (
+                        <option key={c.id} value={c.name}>
+                          {c.phone}
+                        </option>
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+
+                {/* Nombres disponibles que coinciden a medida que se escribe */}
+                {matchingClients.length > 0 && !matchedClient && (
+                  <div className="space-y-1.5 pt-0.5">
+                    <p className="text-[10px] font-bold text-[#8E7E73] uppercase tracking-wider">
+                      {formData.customerName.trim()
+                        ? `Nombres que coinciden con "${formData.customerName}":`
+                        : 'O selecciona una clienta registrada:'}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                      {matchingClients.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => handleSelectClient(c)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-[#FAF3EA] text-[#2D231E] hover:text-[#C86D51] border border-[#DFCBB9] shadow-2xs transition-all hover:scale-[1.02] active:scale-98"
+                        >
+                          <span>{c.name}</span>
+                          <span className="text-[10px] text-[#8E7E73]">({c.phone})</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Clienta confirmada / vinculada */}
+                {matchedClient && (
+                  <div className="flex items-center justify-between text-[11px] text-[#2E7D32] bg-[#E8F5E9] px-3 py-1.5 rounded-xl font-medium border border-[#C8E6C9]">
+                    <div className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      <span>Clienta vinculada: <b>{matchedClient.name}</b></span>
+                    </div>
+                    <span className="text-[10px] text-[#2E7D32]/80">Tel: {matchedClient.phone}</span>
+                  </div>
+                )}
+
+                {/* Teléfono */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
+                    Teléfono de contacto (Opcional)
                   </label>
                   <div className="relative">
                     <Phone className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
@@ -635,13 +604,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     />
                   </div>
                 </div>
-
-                {formData.customerName && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-[#2E7D32] bg-[#E8F5E9] px-2.5 py-1 rounded-lg font-medium">
-                    <Check className="w-3.5 h-3.5 shrink-0" />
-                    <span>Clienta asignada: <b>{formData.customerName}</b> {formData.customerPhone ? `(${formData.customerPhone})` : ''}</span>
-                  </div>
-                )}
               </div>
 
               {/* Notas */}
