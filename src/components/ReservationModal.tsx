@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import type { Workshop, Reservation, DepositStatus, PaymentMethod } from '../types';
 import { useData } from '../context/DataContext';
 import { formatCurrency, formatDateLong, createWhatsAppWorkshopLink } from '../utils/formatters';
@@ -17,8 +17,10 @@ import {
   Trash2, 
   Download, 
   Check, 
-  Phone
+  Phone,
+  Search
 } from 'lucide-react';
+
 
 
 interface ReservationModalProps {
@@ -36,6 +38,20 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Form states for new reservation
   const [clientName, setClientName] = useState('');
@@ -55,6 +71,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+
   if (!isOpen || !workshop) return null;
 
   // Initialize deposit amount with workshop suggested deposit when modal opens
@@ -73,18 +90,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const totalExpected = workshop.reservations.length * workshop.pricePerPerson;
   const totalPendingBalance = Math.max(0, totalExpected - totalCollected);
 
-  const handleSelectExistingClient = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value;
-    setSelectedClientId(id);
-    const client = clients.find(c => c.id === id);
-    if (client) {
-      setClientName(client.name);
-      setClientPhone(client.phone);
-      setClientEmail(client.email || '');
-    }
-  };
-
   const handleAddReservationSubmit = (e: React.FormEvent) => {
+
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -256,26 +263,104 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 </button>
               </div>
 
-              {/* Existing Client Dropdown */}
+              {/* Existing Client Searchable Picker */}
               {mode === 'existing' && (
-                <div className="mb-3">
+                <div className="mb-3 relative" ref={dropdownRef}>
                   <label className="block text-[11px] font-bold text-[#5C4F47] mb-1">
-                    Seleccionar de la Base de Contactos
+                    Buscar en la Base de Contactos
                   </label>
-                  <select
-                    value={selectedClientId}
-                    onChange={handleSelectExistingClient}
-                    className="w-full px-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
-                  >
-                    <option value="">Buscar contacto registrado...</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.phone})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
+                    <input
+                      type="text"
+                      placeholder="Escribe para buscar (ej: Valen, 11 45)..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setIsDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsDropdownOpen(true)}
+                      className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSelectedClientId('');
+                          setClientName('');
+                          setClientPhone('');
+                          setClientEmail('');
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#A8988D] hover:text-[#2D231E]"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {isDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl border border-[#DFCBB9] shadow-xl max-h-48 overflow-y-auto z-50 divide-y divide-[#F2ECE4]">
+                      {clients.filter(c => {
+                        if (!searchQuery.trim()) return true;
+                        const q = searchQuery.toLowerCase().trim();
+                        const cleanQ = q.replace(/\D/g, '');
+                        const cleanPhone = c.phone.replace(/\D/g, '');
+                        return c.name.toLowerCase().includes(q) || (cleanQ.length > 2 && cleanPhone.includes(cleanQ));
+                      }).length > 0 ? (
+                        <>
+                          <div className="px-3 py-1.5 text-[10px] font-bold text-[#8E7E73] bg-[#FAF7F2] uppercase tracking-wider flex items-center justify-between">
+                            <span>{searchQuery.trim() ? 'Coincidencias' : `Contactos (${clients.length})`}</span>
+                            <span className="text-[9px] font-normal lowercase">click para elegir</span>
+                          </div>
+                          {clients.filter(c => {
+                            if (!searchQuery.trim()) return true;
+                            const q = searchQuery.toLowerCase().trim();
+                            const cleanQ = q.replace(/\D/g, '');
+                            const cleanPhone = c.phone.replace(/\D/g, '');
+                            return c.name.toLowerCase().includes(q) || (cleanQ.length > 2 && cleanPhone.includes(cleanQ));
+                          }).map(c => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedClientId(c.id);
+                                setClientName(c.name);
+                                setClientPhone(c.phone);
+                                setClientEmail(c.email || '');
+                                setSearchQuery(c.name);
+                                setIsDropdownOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-[#FAF3EA] transition-colors flex items-center justify-between group"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-[#2D231E] group-hover:text-[#C86D51]">
+                                  {c.name}
+                                </p>
+                                <p className="text-[11px] text-[#7D6E63] flex items-center gap-1">
+                                  <Phone className="w-2.5 h-2.5 text-[#8E7E73]" />
+                                  {c.phone}
+                                </p>
+                              </div>
+                              {selectedClientId === c.id && (
+                                <span className="flex items-center gap-1 text-[11px] font-bold text-[#2E7D32]">
+                                  <Check className="w-3.5 h-3.5" />
+                                  Elegido
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </>
+                      ) : (
+                        <div className="p-3 text-center text-xs text-[#8E7E73]">
+                          No hay contactos con "{searchQuery}".
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
+
 
               <form onSubmit={handleAddReservationSubmit} className="space-y-3 text-xs">
                 

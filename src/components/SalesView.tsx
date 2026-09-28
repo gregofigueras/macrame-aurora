@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import type { Sale, ProductCategory, PaymentMethod } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
@@ -12,9 +12,11 @@ import {
   Trash2, 
   Edit3, 
   X, 
-  ShoppingBag
+  ShoppingBag,
+  User,
+  Phone,
+  Check
 } from 'lucide-react';
-
 
 const PRODUCT_CATEGORIES: ProductCategory[] = [
   'Canastas',
@@ -51,13 +53,17 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
 
+  // Searchable client state in modal
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
+
   // Form state
   const [formData, setFormData] = useState<{
     productName: string;
     category: ProductCategory;
     quantity: number;
     unitPrice: string;
-    estimatedCost: string;
     date: string;
     paymentMethod: PaymentMethod;
     customerName: string;
@@ -68,7 +74,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
     category: 'Canastas',
     quantity: 1,
     unitPrice: '',
-    estimatedCost: '',
     date: new Date().toISOString().slice(0, 10),
     paymentMethod: 'Transferencia',
     customerName: '',
@@ -76,14 +81,26 @@ export const SalesView: React.FC<SalesViewProps> = ({
     notes: '',
   });
 
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
+        setIsClientDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleOpenCreate = () => {
     setEditingSale(null);
+    setClientSearchQuery('');
+    setIsClientDropdownOpen(false);
     setFormData({
       productName: '',
       category: 'Canastas',
       quantity: 1,
       unitPrice: '',
-      estimatedCost: '',
       date: new Date().toISOString().slice(0, 10),
       paymentMethod: 'Transferencia',
       customerName: '',
@@ -95,12 +112,13 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleOpenEdit = (sale: Sale) => {
     setEditingSale(sale);
+    setClientSearchQuery(sale.customerName || '');
+    setIsClientDropdownOpen(false);
     setFormData({
       productName: sale.productName,
       category: sale.category,
       quantity: sale.quantity,
       unitPrice: sale.unitPrice.toString(),
-      estimatedCost: sale.estimatedCost ? sale.estimatedCost.toString() : '',
       date: sale.date,
       paymentMethod: sale.paymentMethod,
       customerName: sale.customerName || '',
@@ -108,19 +126,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
       notes: sale.notes || '',
     });
     setIsModalOpen(true);
-  };
-
-  const handleSelectExistingClient = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const clientId = e.target.value;
-    if (!clientId) return;
-    const client = clients.find(c => c.id === clientId);
-    if (client) {
-      setFormData(prev => ({
-        ...prev,
-        customerName: client.name,
-        customerPhone: client.phone,
-      }));
-    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -132,7 +137,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
     const qty = Number(formData.quantity) || 1;
     const totalAmount = unitPriceNum * qty;
-    const estCost = formData.estimatedCost ? parseFloat(formData.estimatedCost) : undefined;
 
     if (editingSale) {
       updateSale(editingSale.id, {
@@ -141,12 +145,12 @@ export const SalesView: React.FC<SalesViewProps> = ({
         quantity: qty,
         unitPrice: unitPriceNum,
         totalAmount,
-        estimatedCost: estCost,
+        estimatedCost: editingSale.estimatedCost,
         date: formData.date,
         paymentMethod: formData.paymentMethod,
-        customerName: formData.customerName || undefined,
-        customerPhone: formData.customerPhone || undefined,
-        notes: formData.notes || undefined,
+        customerName: formData.customerName.trim() || undefined,
+        customerPhone: formData.customerPhone.trim() || undefined,
+        notes: formData.notes.trim() || undefined,
       });
     } else {
       addSale({
@@ -155,12 +159,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
         quantity: qty,
         unitPrice: unitPriceNum,
         totalAmount,
-        estimatedCost: estCost,
         date: formData.date,
         paymentMethod: formData.paymentMethod,
-        customerName: formData.customerName || undefined,
-        customerPhone: formData.customerPhone || undefined,
-        notes: formData.notes || undefined,
+        customerName: formData.customerName.trim() || undefined,
+        customerPhone: formData.customerPhone.trim() || undefined,
+        notes: formData.notes.trim() || undefined,
       });
     }
 
@@ -181,10 +184,15 @@ export const SalesView: React.FC<SalesViewProps> = ({
   });
 
   const totalFilteredSales = filteredSales.reduce((acc, curr) => acc + curr.totalAmount, 0);
-  const totalFilteredProfit = filteredSales.reduce((acc, curr) => {
-    const cost = curr.estimatedCost || 0;
-    return acc + (curr.totalAmount - cost);
-  }, 0);
+
+  // Filtered clients for customer auto-search
+  const matchingClients = clients.filter(c => {
+    if (!clientSearchQuery.trim()) return true;
+    const q = clientSearchQuery.toLowerCase().trim();
+    const cleanQ = q.replace(/\D/g, '');
+    const cleanPhone = c.phone.replace(/\D/g, '');
+    return c.name.toLowerCase().includes(q) || (cleanQ.length > 2 && cleanPhone.includes(cleanQ));
+  });
 
   // Group amounts by category for quick overview
   const categoryTotals: Record<string, number> = {};
@@ -283,7 +291,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 bg-[#E8F5E9] rounded-xl border border-[#C8E6C9] text-xs font-medium text-[#2E7D32]">
         <span>Mostrando <b>{filteredSales.length}</b> ventas registradas</span>
         <div className="flex items-center gap-4">
-          <span>Ganancia estimada: <b>{formatCurrency(totalFilteredProfit)}</b></span>
           <span className="text-sm font-bold text-[#1B5E20]">
             Total Ventas: {formatCurrency(totalFilteredSales)}
           </span>
@@ -452,7 +459,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 </div>
               </div>
 
-              {/* Precio Unitario y Costo Estimado */}
+              {/* Precio Unitario y Medio de Cobro (Costo de materiales removido según solicitud) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-[#5C4F47] mb-1">
@@ -474,38 +481,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
                 <div>
                   <label className="block font-bold text-[#5C4F47] mb-1">
-                    Costo Materiales ($) (Opcional)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-[#8E7E73]">$</span>
-                    <input
-                      type="number"
-                      placeholder="12000"
-                      value={formData.estimatedCost}
-                      onChange={(e) => setFormData({ ...formData, estimatedCost: e.target.value })}
-                      className="w-full pl-8 pr-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Fecha y Medio de Pago */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[#5C4F47] mb-1">
-                    Fecha de Venta *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-[#5C4F47] mb-1">
                     Medio de Cobro *
                   </label>
                   <select
@@ -520,42 +495,153 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 </div>
               </div>
 
-              {/* Cliente Existente o Nuevo */}
-              <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#DFCBB9]/70 space-y-2.5">
+              {/* Fecha de Venta */}
+              <div>
+                <label className="block font-bold text-[#5C4F47] mb-1">
+                  Fecha de Venta *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs"
+                />
+              </div>
+
+              {/* Datos de la Compradora con Buscador Interactivo por Letras */}
+              <div className="p-3.5 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3" ref={clientDropdownRef}>
                 <div className="flex items-center justify-between">
-                  <label className="font-bold text-[#5C4F47]">
-                    Datos de la Compradora / Cliente
+                  <label className="font-bold text-[#5C4F47] flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-[#C86D51]" />
+                    <span>Datos de la Compradora / Cliente</span>
                   </label>
-                  {clients.length > 0 && (
-                    <select
-                      onChange={handleSelectExistingClient}
-                      className="text-[11px] bg-white border border-[#DFCBB9] rounded-md px-2 py-0.5 text-[#5C4F47]"
-                      defaultValue=""
+                  {(formData.customerName || formData.customerPhone) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }));
+                        setClientSearchQuery('');
+                      }}
+                      className="text-[11px] text-[#C86D51] hover:underline font-semibold flex items-center gap-1"
                     >
-                      <option value="" disabled>Seleccionar de contactos...</option>
-                      {clients.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                      <X className="w-3 h-3" />
+                      Limpiar
+                    </button>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    placeholder="Nombre y Apellido"
-                    value={formData.customerName}
-                    onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-[#DFCBB9] bg-white text-xs"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="Teléfono (ej: 11 4523-9812)"
-                    value={formData.customerPhone}
-                    onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-[#DFCBB9] bg-white text-xs"
-                  />
+                {/* Input con Buscador Interactivo */}
+                <div className="relative">
+                  <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
+                    Buscar o escribir nombre de la compradora:
+                  </label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
+                    <input
+                      type="text"
+                      placeholder="Escribe para buscar (ej: Valen, Camila) o escribe un nombre nuevo..."
+                      value={clientSearchQuery}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setClientSearchQuery(val);
+                        setFormData(prev => ({ ...prev, customerName: val }));
+                        setIsClientDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsClientDropdownOpen(true)}
+                      className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                    />
+                    {clientSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClientSearchQuery('');
+                          setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }));
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#A8988D] hover:text-[#2D231E]"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Dropdown flotante con coincidencias al escribir */}
+                  {isClientDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl border border-[#DFCBB9] shadow-xl max-h-48 overflow-y-auto z-50 divide-y divide-[#F2ECE4]">
+                      {matchingClients.length > 0 ? (
+                        <>
+                          <div className="px-3 py-1.5 text-[10px] font-bold text-[#8E7E73] bg-[#FAF7F2] uppercase tracking-wider flex items-center justify-between">
+                            <span>{clientSearchQuery.trim() ? `Coincidencias (${matchingClients.length})` : `Contactos Registrados (${clients.length})`}</span>
+                            <span className="text-[9px] font-normal lowercase">click para elegir</span>
+                          </div>
+                          {matchingClients.map(c => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  customerName: c.name,
+                                  customerPhone: c.phone
+                                }));
+                                setClientSearchQuery(c.name);
+                                setIsClientDropdownOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-[#FAF3EA] transition-colors flex items-center justify-between group"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-[#2D231E] group-hover:text-[#C86D51]">
+                                  {c.name}
+                                </p>
+                                <p className="text-[11px] text-[#7D6E63] flex items-center gap-1">
+                                  <Phone className="w-2.5 h-2.5 text-[#8E7E73]" />
+                                  {c.phone}
+                                </p>
+                              </div>
+                              {formData.customerName === c.name && (
+                                <span className="flex items-center gap-1 text-[11px] font-bold text-[#2E6B4A]">
+                                  <Check className="w-3.5 h-3.5" />
+                                  Elegida
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </>
+                      ) : (
+                        <div className="p-3 text-center text-xs text-[#8E7E73]">
+                          <p>No hay contactos previos que coincidan con "<b>{clientSearchQuery}</b>".</p>
+                          <p className="text-[11px] text-[#C86D51] font-semibold mt-1">
+                            Se registrará automáticamente como nueva clienta al guardar.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Teléfono de la Compradora */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
+                    Teléfono de contacto (Opcional):
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
+                    <input
+                      type="tel"
+                      placeholder="Ej: 11 4523-9812"
+                      value={formData.customerPhone}
+                      onChange={(e) => setFormData(prev => ({ ...prev, customerPhone: e.target.value }))}
+                      className="w-full pl-8.5 pr-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                    />
+                  </div>
+                </div>
+
+                {formData.customerName && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-[#2E7D32] bg-[#E8F5E9] px-2.5 py-1 rounded-lg font-medium">
+                    <Check className="w-3.5 h-3.5 shrink-0" />
+                    <span>Clienta asignada: <b>{formData.customerName}</b> {formData.customerPhone ? `(${formData.customerPhone})` : ''}</span>
+                  </div>
+                )}
               </div>
 
               {/* Notas */}
