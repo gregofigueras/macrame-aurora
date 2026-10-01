@@ -86,18 +86,19 @@ export const WorkshopModal: React.FC<WorkshopModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-[#DFCBB9] shadow-2xl max-w-xl w-full overflow-hidden max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 md:p-6 animate-in fade-in duration-200">
+      <div className="relative bg-white rounded-2xl sm:rounded-3xl border border-[#DFCBB9] shadow-2xl w-full max-w-xl my-auto max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden">
         
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-[#F2ECE4] bg-[#FAF7F2]">
+        {/* Header Fijo */}
+        <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-[#F2ECE4] bg-[#FAF7F2]">
           <div className="flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-[#C86D51]" />
-            <h3 className="font-serif-aurora text-xl font-bold text-[#2D231E]">
+            <h3 className="font-serif-aurora text-lg sm:text-xl font-bold text-[#2D231E]">
               {editingWorkshop ? 'Editar Taller' : 'Programar Nuevo Taller'}
             </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 rounded-full text-[#8E7E73] hover:bg-[#EFE7DE] transition-colors"
           >
@@ -105,8 +106,8 @@ export const WorkshopModal: React.FC<WorkshopModalProps> = ({
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
+        {/* Form Body Scrolleable */}
+        <form id="workshop-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-3.5 sm:space-y-4 text-xs">
           
           {/* Título */}
           <div>
@@ -262,24 +263,25 @@ export const WorkshopModal: React.FC<WorkshopModalProps> = ({
             />
           </div>
 
-          {/* Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#F2ECE4]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-[#7D6E63] hover:bg-[#F2ECE4] rounded-xl transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-[#C86D51] hover:bg-[#B3583E] text-white text-xs font-bold rounded-xl shadow-md transition-colors"
-            >
-              {editingWorkshop ? 'Guardar Cambios' : 'Crear Taller'}
-            </button>
-          </div>
-
         </form>
+
+        {/* Footer Fijo y Siempre Visible */}
+        <div className="shrink-0 flex items-center justify-end gap-2.5 sm:gap-3 p-3.5 sm:p-4 border-t border-[#F2ECE4] bg-[#FAF7F2]">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-bold text-[#7D6E63] hover:bg-[#F2ECE4] rounded-xl transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            form="workshop-form"
+            className="px-5 py-2.5 bg-[#C86D51] hover:bg-[#B3583E] text-white text-xs font-bold rounded-xl shadow-md transition-colors"
+          >
+            {editingWorkshop ? 'Guardar Cambios' : 'Crear Taller'}
+          </button>
+        </div>
 
       </div>
     </div>

@@ -166,11 +166,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/45 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-[#DFCBB9] shadow-2xl max-w-4xl w-full overflow-hidden max-h-[94vh] flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 md:p-6 animate-in fade-in duration-200">
+      <div className="relative bg-white rounded-2xl sm:rounded-3xl border border-[#DFCBB9] shadow-2xl max-w-4xl w-full my-auto max-h-[94dvh] sm:max-h-[92vh] flex flex-col overflow-hidden">
         
         {/* Workshop Header & Details */}
-        <div className="p-5 sm:p-6 border-b border-[#F2ECE4] bg-gradient-to-r from-[#FAF3EA] via-[#F4EBE1] to-[#FAF7F2]">
+        <div className="shrink-0 p-4 sm:p-6 border-b border-[#F2ECE4] bg-gradient-to-r from-[#FAF3EA] via-[#F4EBE1] to-[#FAF7F2]">
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-1.5">

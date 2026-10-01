@@ -266,19 +266,21 @@ export const ClientsView: React.FC = () => {
         })}
       </div>
 
-      {/* Modal: Add/Edit Client */}
+      {/* Modal: Add/Edit Client - Totalmente Responsive en PC y Celular */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl border border-[#DFCBB9] shadow-2xl max-w-md w-full overflow-hidden">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 md:p-6 animate-in fade-in duration-200">
+          <div className="relative bg-white rounded-2xl sm:rounded-3xl border border-[#DFCBB9] shadow-2xl w-full max-w-md my-auto max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden">
             
-            <div className="flex items-center justify-between p-5 border-b border-[#F2ECE4] bg-[#FAF7F2]">
+            {/* Header Fijo */}
+            <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-[#F2ECE4] bg-[#FAF7F2]">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-[#C86D51]" />
-                <h3 className="font-serif-aurora text-xl font-bold text-[#2D231E]">
+                <h3 className="font-serif-aurora text-lg sm:text-xl font-bold text-[#2D231E]">
                   {editingClient ? 'Editar Contacto' : 'Registrar Persona'}
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="p-1.5 rounded-full text-[#8E7E73] hover:bg-[#EFE7DE] transition-colors"
               >
@@ -286,7 +288,8 @@ export const ClientsView: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+            {/* Form Body Scrolleable */}
+            <form id="client-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-3.5 sm:space-y-4 text-xs">
               <div>
                 <label className="block font-bold text-[#5C4F47] mb-1">
                   Nombre y Apellido *
@@ -340,23 +343,25 @@ export const ClientsView: React.FC = () => {
                   className="w-full px-3.5 py-2 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] text-xs focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
                 />
               </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#F2ECE4]">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 font-bold text-[#7D6E63] hover:bg-[#F2ECE4] rounded-xl transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-[#C86D51] hover:bg-[#B3583E] text-white font-bold rounded-xl shadow-md transition-colors"
-                >
-                  {editingClient ? 'Guardar Cambios' : 'Registrar Persona'}
-                </button>
-              </div>
             </form>
+
+            {/* Footer Fijo y Siempre Visible */}
+            <div className="shrink-0 flex items-center justify-end gap-2.5 sm:gap-3 p-3.5 sm:p-4 border-t border-[#F2ECE4] bg-[#FAF7F2]">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 font-bold text-[#7D6E63] hover:bg-[#F2ECE4] rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                form="client-form"
+                className="px-5 py-2.5 bg-[#C86D51] hover:bg-[#B3583E] text-white font-bold rounded-xl shadow-md transition-colors"
+              >
+                {editingClient ? 'Guardar Cambios' : 'Registrar Persona'}
+              </button>
+            </div>
 
           </div>
         </div>
