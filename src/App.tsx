@@ -7,6 +7,7 @@ import { ExpensesView } from './components/ExpensesView';
 import { SalesView } from './components/SalesView';
 import { WorkshopsView } from './components/WorkshopsView';
 import { ClientsView } from './components/ClientsView';
+import { ArticlesView } from './components/ArticlesView';
 import { ReportsView } from './components/ReportsView';
 import { Heart } from 'lucide-react';
 import { InstagramIcon } from './components/InstagramIcon';
@@ -88,6 +89,8 @@ const MainContent: React.FC = () => {
             setIsModalOpen={setIsExpenseModalOpen}
           />
         )}
+
+        {activeTab === 'articulos' && <ArticlesView />}
 
         {activeTab === 'clientes' && <ClientsView />}
 

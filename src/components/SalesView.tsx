@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import type { Sale, ProductCategory, PaymentMethod, Client } from '../types';
+import type { Sale, ProductCategory, PaymentMethod, Client, Article } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { exportSalesToCSV } from '../utils/exportCsv';
 import { 
@@ -17,7 +17,8 @@ import {
   Phone,
   Check,
   UserPlus,
-  BookOpen
+  BookOpen,
+  Package
 } from 'lucide-react';
 
 const PRODUCT_CATEGORIES: ProductCategory[] = [
@@ -49,7 +50,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
   isModalOpen,
   setIsModalOpen,
 }) => {
-  const { sales, clients, addSale, updateSale, deleteSale } = useData();
+  const { sales, clients, articles, addSale, updateSale, deleteSale } = useData();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
@@ -58,25 +59,36 @@ export const SalesView: React.FC<SalesViewProps> = ({
   // Client search mode and query
   const [clientMode, setClientMode] = useState<'search' | 'manual'>('search');
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [isClientAssigned, setIsClientAssigned] = useState(false);
   const [isClientDirectoryOpen, setIsClientDirectoryOpen] = useState(false);
   const [directorySearchQuery, setDirectorySearchQuery] = useState('');
 
+  // Article selection state
+  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  const [articleSearchQuery, setArticleSearchQuery] = useState('');
+  const [isArticleSelectorOpen, setIsArticleSelectorOpen] = useState(false);
+  const [isCustomProductMode, setIsCustomProductMode] = useState(false);
+
   // Form state
   const [formData, setFormData] = useState<{
+    articleId?: string;
     productName: string;
     category: ProductCategory;
     quantity: number;
     unitPrice: string;
+    estimatedCost?: number;
     date: string;
     paymentMethod: PaymentMethod;
     customerName: string;
     customerPhone: string;
     notes: string;
   }>({
+    articleId: undefined,
     productName: '',
     category: 'Canastas',
     quantity: 1,
     unitPrice: '',
+    estimatedCost: undefined,
     date: new Date().toISOString().slice(0, 10),
     paymentMethod: 'Transferencia',
     customerName: '',
@@ -86,13 +98,20 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleOpenCreate = () => {
     setEditingSale(null);
+    setSelectedArticleId(null);
+    setArticleSearchQuery('');
+    setIsArticleSelectorOpen(false);
+    setIsCustomProductMode(false);
+    setIsClientAssigned(false);
     setClientMode('search');
     setClientSearchQuery('');
     setFormData({
+      articleId: undefined,
       productName: '',
       category: 'Canastas',
       quantity: 1,
       unitPrice: '',
+      estimatedCost: undefined,
       date: new Date().toISOString().slice(0, 10),
       paymentMethod: 'Transferencia',
       customerName: '',
@@ -104,13 +123,23 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleOpenEdit = (sale: Sale) => {
     setEditingSale(sale);
+    const matched = articles.find(
+      a => a.id === sale.articleId || a.name.toLowerCase().trim() === sale.productName.toLowerCase().trim()
+    );
+    setSelectedArticleId(matched ? matched.id : (sale.articleId || null));
+    setArticleSearchQuery('');
+    setIsArticleSelectorOpen(false);
+    setIsCustomProductMode(!matched && !sale.articleId && !!sale.productName);
+    setIsClientAssigned(Boolean(sale.customerName && sale.customerName.trim().length > 0));
     setClientSearchQuery('');
-    setClientMode(sale.customerName ? 'search' : 'search');
+    setClientMode('search');
     setFormData({
+      articleId: sale.articleId,
       productName: sale.productName,
       category: sale.category,
       quantity: sale.quantity,
       unitPrice: sale.unitPrice.toString(),
+      estimatedCost: sale.estimatedCost ? Math.round(sale.estimatedCost / sale.quantity) : undefined,
       date: sale.date,
       paymentMethod: sale.paymentMethod,
       customerName: sale.customerName || '',
@@ -118,6 +147,21 @@ export const SalesView: React.FC<SalesViewProps> = ({
       notes: sale.notes || '',
     });
     setIsModalOpen(true);
+  };
+
+  const handleSelectArticle = (article: Article) => {
+    setSelectedArticleId(article.id);
+    setIsCustomProductMode(false);
+    setIsArticleSelectorOpen(false);
+    setArticleSearchQuery('');
+    setFormData(prev => ({
+      ...prev,
+      articleId: article.id,
+      productName: article.name,
+      category: article.category,
+      unitPrice: article.price.toString(),
+      estimatedCost: article.cost,
+    }));
   };
 
   const handleCustomerNameChange = (nameVal: string) => {
@@ -136,26 +180,40 @@ export const SalesView: React.FC<SalesViewProps> = ({
       customerName: client.name,
       customerPhone: client.phone,
     }));
+    setIsClientAssigned(true);
+  };
+
+  const handleDeselectClient = () => {
+    setIsClientAssigned(false);
+    setFormData(prev => ({
+      ...prev,
+      customerName: '',
+      customerPhone: '',
+    }));
+    setClientSearchQuery('');
+    setClientMode('search');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.productName || !formData.unitPrice) return;
+    if (!formData.productName.trim() || !formData.unitPrice) return;
 
     const unitPriceNum = parseFloat(formData.unitPrice);
     if (isNaN(unitPriceNum) || unitPriceNum <= 0) return;
 
     const qty = Number(formData.quantity) || 1;
     const totalAmount = unitPriceNum * qty;
+    const estimatedCost = formData.estimatedCost ? formData.estimatedCost * qty : undefined;
 
     if (editingSale) {
       updateSale(editingSale.id, {
-        productName: formData.productName,
+        articleId: formData.articleId,
+        productName: formData.productName.trim(),
         category: formData.category,
         quantity: qty,
         unitPrice: unitPriceNum,
         totalAmount,
-        estimatedCost: editingSale.estimatedCost,
+        estimatedCost,
         date: formData.date,
         paymentMethod: formData.paymentMethod,
         customerName: formData.customerName.trim() || undefined,
@@ -164,11 +222,13 @@ export const SalesView: React.FC<SalesViewProps> = ({
       });
     } else {
       addSale({
-        productName: formData.productName,
+        articleId: formData.articleId,
+        productName: formData.productName.trim(),
         category: formData.category,
         quantity: qty,
         unitPrice: unitPriceNum,
         totalAmount,
+        estimatedCost,
         date: formData.date,
         paymentMethod: formData.paymentMethod,
         customerName: formData.customerName.trim() || undefined,
@@ -235,6 +295,25 @@ export const SalesView: React.FC<SalesViewProps> = ({
   sales.forEach(s => {
     categoryTotals[s.category] = (categoryTotals[s.category] || 0) + s.totalAmount;
   });
+
+  // Artículos ordenados alfabéticamente A-Z para la selección en ventas
+  const sortedArticles = [...articles].sort((a, b) =>
+    a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+  );
+
+  const cleanArticleSearch = articleSearchQuery.trim().toLowerCase();
+  const filteredArticles = sortedArticles.filter(a => {
+    if (!cleanArticleSearch) return true;
+    return (
+      a.name.toLowerCase().includes(cleanArticleSearch) ||
+      a.category.toLowerCase().includes(cleanArticleSearch) ||
+      (a.threadType && a.threadType.toLowerCase().includes(cleanArticleSearch))
+    );
+  });
+
+  const currentSelectedArticle = articles.find(
+    a => a.id === selectedArticleId || a.name.toLowerCase().trim() === formData.productName.toLowerCase().trim()
+  );
 
   return (
     <div className="space-y-6 pb-12">
@@ -367,6 +446,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
                       {sale.notes && (
                         <p className="text-[11px] text-[#8E7E73] italic mt-0.5">{sale.notes}</p>
                       )}
+                      {sale.estimatedCost !== undefined && (
+                        <p className="text-[10px] text-[#2E6B4A] font-semibold mt-0.5">
+                          Margen est.: +{formatCurrency(sale.totalAmount - sale.estimatedCost)}
+                        </p>
+                      )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#FAF3EA] text-[#93452E] border border-[#DFCBB9]">
@@ -451,19 +535,199 @@ export const SalesView: React.FC<SalesViewProps> = ({
             {/* Form Body Scrolleable con scroll táctil suave */}
             <form id="sale-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-3.5 sm:space-y-4 text-xs">
               
-              {/* Producto */}
-              <div>
-                <label className="block font-bold text-[#5C4F47] mb-1">
-                  Nombre de la Pieza / Producto *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Espejo Sol Bohemio 35cm, Canasta organizadora, Armazón decorado..."
-                  value={formData.productName}
-                  onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-sm"
-                />
+              {/* Selector de Artículo del Catálogo (A-Z) */}
+              <div className="p-3.5 sm:p-4 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="font-bold text-[#5C4F47] text-xs flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-[#C86D51]" />
+                    <span>Artículo del Catálogo *</span>
+                    <span className="text-[10px] text-[#8E7E73] font-normal">
+                      ({sortedArticles.length} disponibles A-Z)
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomProductMode(!isCustomProductMode);
+                      setIsArticleSelectorOpen(false);
+                      if (!isCustomProductMode) {
+                        setSelectedArticleId(null);
+                      }
+                    }}
+                    className="text-[11px] text-[#C86D51] hover:underline font-semibold"
+                  >
+                    {isCustomProductMode ? '← Elegir de Artículos' : '+ Ingresar manual'}
+                  </button>
+                </div>
+
+                {isCustomProductMode ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Espejo Sol Bohemio 35cm, Canasta especial..."
+                      value={formData.productName}
+                      onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-white focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-sm"
+                    />
+                    <p className="text-[11px] text-[#8E7E73] italic">
+                      Ingreso manual fuera del catálogo cargado. Si es una pieza frecuente, te recomendamos agregarla en la pestaña "Artículos".
+                    </p>
+                  </div>
+                ) : (
+                  formData.productName && !isArticleSelectorOpen ? (
+                    /* Tarjeta de Artículo Seleccionado */
+                    <div className="p-3 bg-white rounded-xl border border-[#C8E6C9] shadow-2xs space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-[#E8F5E9] text-[#2E7D32] font-bold flex items-center justify-center text-xs shrink-0 mt-0.5">
+                            <Check className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-bold text-[#2E7D32] uppercase tracking-wider bg-[#E8F5E9] px-1.5 py-0.2 rounded">
+                                Artículo Seleccionado
+                              </span>
+                              {currentSelectedArticle?.threadType && (
+                                <span className="text-[10px] font-medium text-[#7D6E63] bg-[#EFE7DE] px-1.5 py-0.2 rounded">
+                                  {currentSelectedArticle.threadType}
+                                </span>
+                              )}
+                            </div>
+                            <p className="font-bold text-sm text-[#2D231E] mt-0.5 break-words">
+                              {formData.productName}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setArticleSearchQuery('');
+                            setIsArticleSelectorOpen(true);
+                          }}
+                          className="px-2.5 py-1 text-xs font-semibold text-[#8E7E73] hover:text-[#2D231E] bg-[#FAF7F2] hover:bg-[#EFE7DE] rounded-lg border border-[#DFCBB9] transition-colors shrink-0"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+
+                      {/* Info de Costo y Ganancia Unitaria */}
+                      {currentSelectedArticle && (
+                        <div className="pt-2 border-t border-[#F2ECE4] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#5C4F47]">
+                          <div>
+                            <span>Costo material: <b>{formatCurrency(currentSelectedArticle.cost)}</b></span>
+                          </div>
+                          <div>
+                            <span>Precio catálogo: <b>{formatCurrency(currentSelectedArticle.price)}</b></span>
+                          </div>
+                          <div className="text-[#2E6B4A] font-bold">
+                            Ganancia est. u.: +{formatCurrency(currentSelectedArticle.price - currentSelectedArticle.cost)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Lista / Buscador de Artículos ordenados A-Z */
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
+                        <input
+                          type="text"
+                          placeholder="Buscar artículo A-Z (ej: Bandeja, Cesto, Espejo, Hilo...)"
+                          value={articleSearchQuery}
+                          onChange={(e) => setArticleSearchQuery(e.target.value)}
+                          className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                        />
+                        {articleSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setArticleSearchQuery('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8E7E73] hover:text-[#2D231E]"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="max-h-48 sm:max-h-56 overflow-y-auto rounded-xl border border-[#DFCBB9] bg-white divide-y divide-[#F2ECE4] shadow-inner">
+                        <div className="px-3 py-1.5 text-[10px] font-bold text-[#8E7E73] bg-[#FAF7F2] uppercase tracking-wider flex items-center justify-between sticky top-0 z-10">
+                          <span>
+                            {articleSearchQuery
+                              ? `Coincidencias (${filteredArticles.length})`
+                              : `Artículos disponibles (${filteredArticles.length}) — Orden A-Z`}
+                          </span>
+                          <span className="text-[9px] font-normal lowercase">click para elegir</span>
+                        </div>
+
+                        {filteredArticles.length > 0 ? (
+                          filteredArticles.map(a => (
+                            <button
+                              key={a.id}
+                              type="button"
+                              onClick={() => handleSelectArticle(a)}
+                              className="w-full text-left p-2.5 hover:bg-[#FAF3EA] transition-colors flex items-center justify-between group gap-2"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-7 h-7 rounded-lg bg-[#FAF0E6] text-[#C86D51] font-bold flex items-center justify-center text-xs shrink-0 group-hover:bg-[#C86D51] group-hover:text-white transition-colors">
+                                  {a.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="truncate">
+                                  <p className="font-bold text-xs text-[#2D231E] group-hover:text-[#C86D51] transition-colors truncate">
+                                    {a.name}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-[#7D6E63]">
+                                    <span className="bg-[#FAF7F2] px-1.5 py-0.2 rounded border border-[#EFE7DE]">
+                                      {a.category}
+                                    </span>
+                                    {a.threadType && (
+                                      <span>• {a.threadType}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0">
+                                <p className="font-bold text-xs text-[#2E6B4A]">
+                                  {formatCurrency(a.price)}
+                                </p>
+                                <p className="text-[10px] text-[#8E7E73]">
+                                  Costo: {formatCurrency(a.cost)}
+                                </p>
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="p-4 text-center text-xs text-[#7D6E63] space-y-1.5">
+                            <p>No se encontraron artículos con "{articleSearchQuery}".</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsCustomProductMode(true);
+                                setFormData(prev => ({ ...prev, productName: articleSearchQuery }));
+                              }}
+                              className="text-xs font-bold text-[#C86D51] hover:underline"
+                            >
+                              + Usar "{articleSearchQuery}" como producto personalizado
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {formData.productName && isArticleSelectorOpen && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsArticleSelectorOpen(false)}
+                            className="text-[11px] font-semibold text-[#7D6E63] hover:text-[#2D231E]"
+                          >
+                            Mantener "{formData.productName}"
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                )}
               </div>
 
               {/* Categoría y Cantidad */}
@@ -556,14 +820,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     <span>Clienta / Compradora</span>
                     <span className="text-[10px] text-[#8E7E73] font-normal">({clients.length} registradas)</span>
                   </label>
-                  {formData.customerName && (
+                  {(isClientAssigned || formData.customerName) && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }));
-                        setClientSearchQuery('');
-                        setClientMode('search');
-                      }}
+                      onClick={handleDeselectClient}
                       className="text-[11px] text-[#C86D51] hover:underline font-semibold"
                     >
                       Desvincular
@@ -572,7 +832,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 </div>
 
                 {/* Si ya hay clienta elegida / asignada */}
-                {formData.customerName ? (
+                {isClientAssigned && formData.customerName ? (
                   <div className="p-3 bg-white rounded-xl border border-[#C8E6C9] shadow-2xs space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
@@ -591,11 +851,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => {
-                          setFormData(prev => ({ ...prev, customerName: '', customerPhone: '' }));
-                          setClientSearchQuery('');
-                          setClientMode('search');
-                        }}
+                        onClick={handleDeselectClient}
                         className="px-2.5 py-1 text-xs font-semibold text-[#8E7E73] hover:text-[#2D231E] bg-[#FAF7F2] hover:bg-[#EFE7DE] rounded-lg border border-[#DFCBB9] transition-colors"
                       >
                         Cambiar
@@ -780,6 +1036,21 @@ export const SalesView: React.FC<SalesViewProps> = ({
                                 </button>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {formData.customerName.trim().length > 0 && (
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[10px] text-[#2E6B4A]">
+                              ✓ Se guardará en la libreta de clientas automáticamente
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsClientAssigned(true)}
+                              className="text-[11px] font-semibold text-[#2E6B4A] hover:underline"
+                            >
+                              Fijar como asignada ✓
+                            </button>
                           </div>
                         )}
                       </div>

@@ -37,10 +37,22 @@ export type ProductCategory =
   | 'Encargo Personalizado'
   | 'Otros';
 
+export interface Article {
+  id: string;
+  name: string;
+  category: ProductCategory;
+  cost: number; // Costo de materiales / insumos
+  price: number; // Precio de venta al público
+  threadType?: string; // Tipo de hilo si corresponde
+  notes?: string;
+  createdAt: string;
+}
+
 export interface Sale {
   id: string;
   date: string; // YYYY-MM-DD
-  productName: string; // e.g. "Espejo Sol Bohemio 35cm"
+  articleId?: string; // ID del artículo seleccionado si proviene del catálogo
+  productName: string; // Nombre del artículo o pieza
   category: ProductCategory;
   quantity: number;
   unitPrice: number;

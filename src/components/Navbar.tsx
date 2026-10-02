@@ -4,13 +4,14 @@ import {
   CalendarDays, 
   TrendingUp, 
   Receipt, 
+  Package,
   Users, 
   Download, 
   Sparkles
 } from 'lucide-react';
 import { InstagramIcon } from './InstagramIcon';
 
-export type ActiveTab = 'dashboard' | 'talleres' | 'ventas' | 'gastos' | 'clientes' | 'reportes';
+export type ActiveTab = 'dashboard' | 'talleres' | 'ventas' | 'gastos' | 'articulos' | 'clientes' | 'reportes';
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -33,6 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     },
     { id: 'ventas', label: 'Ganancias / Ventas', icon: TrendingUp },
     { id: 'gastos', label: 'Gastos / Insumos', icon: Receipt },
+    { id: 'articulos', label: 'Artículos & Costos', icon: Package },
     { id: 'clientes', label: 'Alumnos & Clientes', icon: Users },
     { id: 'reportes', label: 'Reportes & Backup', icon: Download },
   ];

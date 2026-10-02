@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { Expense, Sale, Workshop, Client, Reservation, DepositStatus, PaymentMethod } from '../types';
+import type { Expense, Sale, Workshop, Client, Reservation, DepositStatus, PaymentMethod, Article } from '../types';
 
 const STORAGE_KEY = 'macrame_aurora_data_v1';
 
@@ -8,7 +8,14 @@ interface DataContextType {
   sales: Sale[];
   workshops: Workshop[];
   clients: Client[];
+  articles: Article[];
   
+  // Articles CRUD
+  addArticle: (article: Omit<Article, 'id' | 'createdAt'>) => Article;
+  updateArticle: (id: string, article: Partial<Article>) => void;
+  deleteArticle: (id: string) => void;
+  resetArticlesToExcel: () => void;
+
   // Expenses CRUD
   addExpense: (expense: Omit<Expense, 'id'>) => Expense;
   updateExpense: (id: string, expense: Partial<Expense>) => void;
@@ -57,6 +64,152 @@ const initialClients: Client[] = [
   { id: 'c-4', name: 'Luciana Rossi', phone: '11 6541-8902', email: 'lurossi@gmail.com', createdAt: '2026-09-15' },
   { id: 'c-5', name: 'Mariana Fernandez', phone: '11 4120-9534', email: 'mariana.f@gmail.com', createdAt: '2026-09-18' },
   { id: 'c-6', name: 'Paula Castro', phone: '11 2938-4756', email: 'paucastro@gmail.com', createdAt: '2026-09-20' },
+];
+
+export const excelArticles: Article[] = [
+  {
+    id: 'art-1',
+    name: 'Armazon bandeja circular chica',
+    category: 'Armazones Decorados',
+    cost: 3100,
+    price: 7500,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-2',
+    name: 'Armazon bandeja circular grande',
+    category: 'Armazones Decorados',
+    cost: 4200,
+    price: 10000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-3',
+    name: 'Armazon bandeja rectangular',
+    category: 'Armazones Decorados',
+    cost: 3900,
+    price: 7500,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-4',
+    name: 'Armazon cesto',
+    category: 'Canastas',
+    cost: 4800,
+    price: 10000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-5',
+    name: 'Armazon espejo',
+    category: 'Espejos',
+    cost: 3200,
+    price: 10000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-6',
+    name: 'Armazon pantalla',
+    category: 'Otros',
+    cost: 3900,
+    price: 10000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-7',
+    name: 'Bandeja circular (Hilo papel kraft)',
+    category: 'Canastas',
+    cost: 15370,
+    price: 40000,
+    threadType: 'Hilo papel kraft',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-8',
+    name: 'Bandeja rectangular (Hilo papel kraft)',
+    category: 'Canastas',
+    cost: 16170,
+    price: 40000,
+    threadType: 'Hilo papel kraft',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-9',
+    name: 'Cesto (Hilo papel kraft)',
+    category: 'Canastas',
+    cost: 16220,
+    price: 40000,
+    threadType: 'Hilo papel kraft',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-10',
+    name: 'Espejo chico',
+    category: 'Espejos',
+    cost: 2000,
+    price: 3500,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-11',
+    name: 'Espejo grande',
+    category: 'Espejos',
+    cost: 5500,
+    price: 7000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-12',
+    name: 'Espejo (Hilo papel kraft)',
+    category: 'Espejos',
+    cost: 21395,
+    price: 40000,
+    threadType: 'Hilo papel kraft',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-13',
+    name: 'Espejo (Hilo polipropileno)',
+    category: 'Espejos',
+    cost: 21145,
+    price: 40000,
+    threadType: 'Hilo polipropileno',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-14',
+    name: 'Hilo papel kraft',
+    category: 'Otros',
+    cost: 8500,
+    price: 10000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-15',
+    name: 'Hilo polipropileno',
+    category: 'Otros',
+    cost: 7500,
+    price: 10000,
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-16',
+    name: 'Pantalla (Hilo papel kraft)',
+    category: 'Otros',
+    cost: 16170,
+    price: 40000,
+    threadType: 'Hilo papel kraft',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'art-17',
+    name: 'Pantalla (Hilo polipropileno)',
+    category: 'Otros',
+    cost: 15970,
+    price: 40000,
+    threadType: 'Hilo polipropileno',
+    createdAt: '2026-09-01'
+  }
 ];
 
 const initialExpenses: Expense[] = [
@@ -353,6 +506,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : initialClients;
   });
 
+  const [articles, setArticles] = useState<Article[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY + '_articles');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        // fallback to excel articles
+      }
+    }
+    return excelArticles;
+  });
+
   // Sync to local storage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY + '_expenses', JSON.stringify(expenses));
@@ -369,6 +535,33 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY + '_clients', JSON.stringify(clients));
   }, [clients]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY + '_articles', JSON.stringify(articles));
+  }, [articles]);
+
+  // Articles CRUD
+  const addArticle = (articleData: Omit<Article, 'id' | 'createdAt'>): Article => {
+    const newArticle: Article = {
+      ...articleData,
+      id: 'art-' + Date.now(),
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+    setArticles(prev => [...prev, newArticle]);
+    return newArticle;
+  };
+
+  const updateArticle = (id: string, data: Partial<Article>) => {
+    setArticles(prev => prev.map(a => (a.id === id ? { ...a, ...data } : a)));
+  };
+
+  const deleteArticle = (id: string) => {
+    setArticles(prev => prev.filter(a => a.id !== id));
+  };
+
+  const resetArticlesToExcel = () => {
+    setArticles(excelArticles);
+  };
 
   // Clients
   const addClient = (clientData: Omit<Client, 'id' | 'createdAt'>): Client => {
@@ -424,9 +617,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...saleData,
       id: 'sale-' + Date.now(),
     };
-    // Also auto-register client if phone provided
-    if (saleData.customerName && saleData.customerPhone) {
-      findOrCreateClient(saleData.customerName, saleData.customerPhone);
+    // Also auto-register client if customerName provided
+    if (saleData.customerName) {
+      findOrCreateClient(saleData.customerName, saleData.customerPhone || '');
     }
     setSales(prev => [newSale, ...prev]);
     return newSale;
@@ -574,6 +767,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSales(initialSales);
     setWorkshops(initialWorkshops);
     setClients(initialClients);
+    setArticles(excelArticles);
   };
 
   const exportJSONBackup = () => {
@@ -584,6 +778,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sales,
       workshops,
       clients,
+      articles,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -601,6 +796,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (parsed.sales) setSales(parsed.sales);
       if (parsed.workshops) setWorkshops(parsed.workshops);
       if (parsed.clients) setClients(parsed.clients);
+      if (parsed.articles) setArticles(parsed.articles);
       return true;
     } catch (err) {
       console.error('Error importing backup:', err);
@@ -615,6 +811,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sales,
         workshops,
         clients,
+        articles,
+        addArticle,
+        updateArticle,
+        deleteArticle,
+        resetArticlesToExcel,
         addExpense,
         updateExpense,
         deleteExpense,
