@@ -34,8 +34,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const { expenses, sales, workshops } = useData();
 
-  // Calculate product sales income
-  const totalSalesIncome = sales.reduce((acc, s) => acc + s.totalAmount, 0);
+  // Calculate product sales income (collected: regular sales + deposits of pending custom orders)
+  const totalSalesIncome = sales.reduce((acc, s) => {
+    if (s.isCustomOrder && !s.isFullyPaid) {
+      return acc + (s.depositAmount || 0);
+    }
+    return acc + s.totalAmount;
+  }, 0);
 
   // Calculate workshop income (deposits collected + full payments collected)
   let totalWorkshopIncome = 0;
@@ -444,9 +449,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 className="flex items-center justify-between p-3 rounded-xl bg-[#FAF7F2] border border-[#F2ECE4]"
               >
                 <div>
-                  <p className="text-sm font-semibold text-[#2D231E]">
-                    {sale.productName}
-                  </p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm font-semibold text-[#2D231E]">
+                      {sale.productName}
+                    </p>
+                    {sale.isCustomOrder && (
+                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
+                        !sale.isFullyPaid
+                          ? 'bg-[#FFF3E0] text-[#E65100] border-[#FFE0B2]'
+                          : 'bg-[#E8F5E9] text-[#2E7D32] border-[#C8E6C9]'
+                      }`}>
+                        {!sale.isFullyPaid ? 'Encargo' : 'Encargo Saldado'}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-[#8E7E73]">
                     {formatDate(sale.date)} • {sale.customerName ? `Cliente: ${sale.customerName}` : sale.category}
                   </p>

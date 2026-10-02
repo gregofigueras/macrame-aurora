@@ -62,6 +62,12 @@ export interface Sale {
   customerName?: string;
   customerPhone?: string;
   notes?: string;
+
+  // Venta por encargo con seña (opcional)
+  isCustomOrder?: boolean; // Indica si la venta es por encargo
+  depositAmount?: number; // Monto de la seña abonada ($)
+  isFullyPaid?: boolean; // true si ya abonó el saldo restante al entregar, false si solo pagó seña
+  deliveryDate?: string; // Fecha estimada de entrega / terminación
 }
 
 export type WorkshopStatus = 'Programado' | 'En Curso' | 'Finalizado' | 'Cancelado';

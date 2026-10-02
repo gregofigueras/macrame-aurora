@@ -32,16 +32,46 @@ export const exportExpensesToCSV = (expenses: Expense[]) => {
 };
 
 export const exportSalesToCSV = (sales: Sale[]) => {
-  const headers = ['Fecha', 'Producto', 'Categoría', 'Cantidad', 'Precio Unitario ($)', 'Total ($)', 'Costo Estimado ($)', 'Ganancia Estimada ($)', 'Método de Pago', 'Cliente', 'Teléfono', 'Notas'];
+  const headers = [
+    'Fecha',
+    'Producto',
+    'Categoría',
+    'Tipo de Venta',
+    'Cantidad',
+    'Precio Unitario ($)',
+    'Total ($)',
+    'Seña Pagada ($)',
+    'Saldo Pendiente ($)',
+    'Estado de Pago',
+    'Fecha Entrega',
+    'Costo Estimado ($)',
+    'Ganancia Estimada ($)',
+    'Método de Pago',
+    'Cliente',
+    'Teléfono',
+    'Notas'
+  ];
   const rows = sales.map(s => {
     const profit = s.totalAmount - (s.estimatedCost || 0);
+    const orderType = s.isCustomOrder ? 'Por Encargo' : 'Venta Directa';
+    const deposit = s.isCustomOrder ? (s.depositAmount || 0) : s.totalAmount;
+    const pendingBalance = s.isCustomOrder && !s.isFullyPaid ? Math.max(0, s.totalAmount - (s.depositAmount || 0)) : 0;
+    const paymentStatus = s.isCustomOrder
+      ? (s.isFullyPaid ? '100% Abonado' : 'Solo Seña (Resta Saldo)')
+      : 'Pagado Total';
+
     return [
       s.date,
       s.productName,
       s.category,
+      orderType,
       s.quantity.toString(),
       s.unitPrice.toString(),
       s.totalAmount.toString(),
+      deposit.toString(),
+      pendingBalance.toString(),
+      paymentStatus,
+      s.deliveryDate || '',
       (s.estimatedCost || 0).toString(),
       profit.toString(),
       s.paymentMethod,

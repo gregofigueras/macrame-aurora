@@ -25,6 +25,7 @@ interface DataContextType {
   addSale: (sale: Omit<Sale, 'id'>) => Sale;
   updateSale: (id: string, sale: Partial<Sale>) => void;
   deleteSale: (id: string) => void;
+  markSaleFullyPaid: (id: string) => void;
 
   // Workshops CRUD
   addWorkshop: (workshop: Omit<Workshop, 'id' | 'reservations'>) => Workshop;
@@ -633,6 +634,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSales(prev => prev.filter(s => s.id !== id));
   };
 
+  const markSaleFullyPaid = (id: string) => {
+    setSales(prev => prev.map(s => (s.id === id ? { ...s, isFullyPaid: true } : s)));
+  };
+
   // Workshops
   const addWorkshop = (workshopData: Omit<Workshop, 'id' | 'reservations'>): Workshop => {
     const newWorkshop: Workshop = {
@@ -822,6 +827,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addSale,
         updateSale,
         deleteSale,
+        markSaleFullyPaid,
         addWorkshop,
         updateWorkshop,
         deleteWorkshop,

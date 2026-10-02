@@ -18,7 +18,11 @@ import {
   Check,
   UserPlus,
   BookOpen,
-  Package
+  Package,
+  Clock,
+  Coins,
+  CheckCircle2,
+  Calendar
 } from 'lucide-react';
 
 const PRODUCT_CATEGORIES: ProductCategory[] = [
@@ -50,10 +54,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
   isModalOpen,
   setIsModalOpen,
 }) => {
-  const { sales, clients, articles, addSale, updateSale, deleteSale } = useData();
+  const { sales, clients, articles, addSale, updateSale, deleteSale, markSaleFullyPaid } = useData();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
+  const [orderTypeFilter, setOrderTypeFilter] = useState<'all' | 'custom_orders' | 'pending_balance' | 'immediate'>('all');
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
 
   // Client search mode and query
@@ -82,6 +87,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
     customerName: string;
     customerPhone: string;
     notes: string;
+    isCustomOrder: boolean;
+    depositAmount: string;
+    isFullyPaid: boolean;
+    deliveryDate: string;
   }>({
     articleId: undefined,
     productName: '',
@@ -94,6 +103,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
     customerName: '',
     customerPhone: '',
     notes: '',
+    isCustomOrder: false,
+    depositAmount: '',
+    isFullyPaid: false,
+    deliveryDate: '',
   });
 
   const handleOpenCreate = () => {
@@ -117,6 +130,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
       customerName: '',
       customerPhone: '',
       notes: '',
+      isCustomOrder: false,
+      depositAmount: '',
+      isFullyPaid: false,
+      deliveryDate: '',
     });
     setIsModalOpen(true);
   };
@@ -145,6 +162,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
       customerName: sale.customerName || '',
       customerPhone: sale.customerPhone || '',
       notes: sale.notes || '',
+      isCustomOrder: Boolean(sale.isCustomOrder),
+      depositAmount: sale.depositAmount !== undefined ? sale.depositAmount.toString() : '',
+      isFullyPaid: sale.isFullyPaid !== undefined ? sale.isFullyPaid : (!sale.isCustomOrder),
+      deliveryDate: sale.deliveryDate || '',
     });
     setIsModalOpen(true);
   };
@@ -204,37 +225,34 @@ export const SalesView: React.FC<SalesViewProps> = ({
     const qty = Number(formData.quantity) || 1;
     const totalAmount = unitPriceNum * qty;
     const estimatedCost = formData.estimatedCost ? formData.estimatedCost * qty : undefined;
+    const depositAmountNum = formData.isCustomOrder && formData.depositAmount ? parseFloat(formData.depositAmount) : undefined;
+    const isFullyPaidVal = formData.isCustomOrder
+      ? (formData.isFullyPaid || (depositAmountNum !== undefined && depositAmountNum >= totalAmount))
+      : undefined;
+
+    const salePayload = {
+      articleId: formData.articleId,
+      productName: formData.productName.trim(),
+      category: formData.category,
+      quantity: qty,
+      unitPrice: unitPriceNum,
+      totalAmount,
+      estimatedCost,
+      date: formData.date,
+      paymentMethod: formData.paymentMethod,
+      customerName: formData.customerName.trim() || undefined,
+      customerPhone: formData.customerPhone.trim() || undefined,
+      notes: formData.notes.trim() || undefined,
+      isCustomOrder: formData.isCustomOrder,
+      depositAmount: formData.isCustomOrder ? (depositAmountNum || 0) : undefined,
+      isFullyPaid: isFullyPaidVal,
+      deliveryDate: formData.isCustomOrder && formData.deliveryDate ? formData.deliveryDate : undefined,
+    };
 
     if (editingSale) {
-      updateSale(editingSale.id, {
-        articleId: formData.articleId,
-        productName: formData.productName.trim(),
-        category: formData.category,
-        quantity: qty,
-        unitPrice: unitPriceNum,
-        totalAmount,
-        estimatedCost,
-        date: formData.date,
-        paymentMethod: formData.paymentMethod,
-        customerName: formData.customerName.trim() || undefined,
-        customerPhone: formData.customerPhone.trim() || undefined,
-        notes: formData.notes.trim() || undefined,
-      });
+      updateSale(editingSale.id, salePayload);
     } else {
-      addSale({
-        articleId: formData.articleId,
-        productName: formData.productName.trim(),
-        category: formData.category,
-        quantity: qty,
-        unitPrice: unitPriceNum,
-        totalAmount,
-        estimatedCost,
-        date: formData.date,
-        paymentMethod: formData.paymentMethod,
-        customerName: formData.customerName.trim() || undefined,
-        customerPhone: formData.customerPhone.trim() || undefined,
-        notes: formData.notes.trim() || undefined,
-      });
+      addSale(salePayload);
     }
 
     setIsModalOpen(false);
@@ -250,7 +268,16 @@ export const SalesView: React.FC<SalesViewProps> = ({
     const matchesCategory =
       selectedCategory === 'Todas' || s.category === selectedCategory;
 
-    return matchesSearch && matchesCategory;
+    let matchesOrderType = true;
+    if (orderTypeFilter === 'custom_orders') {
+      matchesOrderType = Boolean(s.isCustomOrder);
+    } else if (orderTypeFilter === 'pending_balance') {
+      matchesOrderType = Boolean(s.isCustomOrder && !s.isFullyPaid);
+    } else if (orderTypeFilter === 'immediate') {
+      matchesOrderType = !s.isCustomOrder;
+    }
+
+    return matchesSearch && matchesCategory && matchesOrderType;
   });
 
   const totalFilteredSales = filteredSales.reduce((acc, curr) => acc + curr.totalAmount, 0);
@@ -314,6 +341,25 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const currentSelectedArticle = articles.find(
     a => a.id === selectedArticleId || a.name.toLowerCase().trim() === formData.productName.toLowerCase().trim()
   );
+
+  // Métricas de encargos y señas
+  const totalCustomOrders = sales.filter(s => s.isCustomOrder).length;
+  const pendingCustomOrders = sales.filter(s => s.isCustomOrder && !s.isFullyPaid);
+  const totalPendingBalance = pendingCustomOrders.reduce(
+    (acc, s) => acc + Math.max(0, s.totalAmount - (s.depositAmount || 0)),
+    0
+  );
+  const totalCollectedDeposits = sales.filter(s => s.isCustomOrder).reduce(
+    (acc, s) => acc + (s.depositAmount || 0),
+    0
+  );
+
+  // Cálculos dinámicos en tiempo real para el modal
+  const modalUnitPriceNum = parseFloat(formData.unitPrice) || 0;
+  const modalQtyNum = Number(formData.quantity) || 1;
+  const modalTotalAmount = modalUnitPriceNum * modalQtyNum;
+  const modalDepositNum = parseFloat(formData.depositAmount) || 0;
+  const modalRemainingBalance = Math.max(0, modalTotalAmount - modalDepositNum);
 
   return (
     <div className="space-y-6 pb-12">
@@ -387,25 +433,56 @@ export const SalesView: React.FC<SalesViewProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-[#8E7E73] shrink-0" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <Filter className="w-4 h-4 text-[#8E7E73] shrink-0" />
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="text-xs font-semibold text-[#5C4F47] py-2 px-3 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+            >
+              <option value="Todas">Todas las Categorías</option>
+              {PRODUCT_CATEGORIES.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+
           <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            value={orderTypeFilter}
+            onChange={(e) => setOrderTypeFilter(e.target.value as any)}
             className="text-xs font-semibold text-[#5C4F47] py-2 px-3 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
           >
-            <option value="Todas">Todas las Categorías</option>
-            {PRODUCT_CATEGORIES.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
+            <option value="all">Todas las Ventas</option>
+            <option value="pending_balance">Encargos con Saldo Pendiente ({pendingCustomOrders.length})</option>
+            <option value="custom_orders">Todos los Encargos ({totalCustomOrders})</option>
+            <option value="immediate">Ventas Inmediatas</option>
           </select>
         </div>
       </div>
 
       {/* Summary Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 bg-[#E8F5E9] rounded-xl border border-[#C8E6C9] text-xs font-medium text-[#2E7D32]">
-        <span>Mostrando <b>{filteredSales.length}</b> ventas registradas</span>
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-4 py-3 bg-[#E8F5E9] rounded-xl border border-[#C8E6C9] text-xs font-medium text-[#2E7D32]">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span>Mostrando <b>{filteredSales.length}</b> ventas registradas</span>
+          {pendingCustomOrders.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-[#FFF3E0] text-[#E65100] font-bold border border-[#FFE0B2] text-[11px] flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {pendingCustomOrders.length} {pendingCustomOrders.length === 1 ? 'encargo pendiente de saldo' : 'encargos pendientes de saldo'}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+          {totalPendingBalance > 0 && (
+            <span className="text-xs font-bold text-[#E65100]">
+              Saldo por cobrar: {formatCurrency(totalPendingBalance)}
+            </span>
+          )}
+          {totalCollectedDeposits > 0 && (
+            <span className="text-xs text-[#2E7D32] font-semibold">
+              Señas recibidas: {formatCurrency(totalCollectedDeposits)}
+            </span>
+          )}
           <span className="text-sm font-bold text-[#1B5E20]">
             Total Ventas: {formatCurrency(totalFilteredSales)}
           </span>
@@ -431,7 +508,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                   <th className="py-3 px-4">Cliente</th>
                   <th className="py-3 px-4">Medio de Pago</th>
                   <th className="py-3 px-4 text-center">Cant.</th>
-                  <th className="py-3 px-4 text-right">Total</th>
+                  <th className="py-3 px-4 text-right">Total / Seña</th>
                   <th className="py-3 px-4 text-center">Acciones</th>
                 </tr>
               </thead>
@@ -442,7 +519,24 @@ export const SalesView: React.FC<SalesViewProps> = ({
                       {formatDate(sale.date)}
                     </td>
                     <td className="py-3 px-4">
-                      <p className="font-bold text-[#2D231E]">{sale.productName}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-bold text-[#2D231E]">{sale.productName}</p>
+                        {sale.isCustomOrder && (
+                          <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${
+                            !sale.isFullyPaid
+                              ? 'bg-[#FFF3E0] text-[#E65100] border-[#FFE0B2]'
+                              : 'bg-[#E8F5E9] text-[#2E7D32] border-[#C8E6C9]'
+                          }`}>
+                            {!sale.isFullyPaid ? 'Encargo • Seña' : 'Encargo • Saldado'}
+                          </span>
+                        )}
+                      </div>
+                      {sale.deliveryDate && !sale.isFullyPaid && (
+                        <p className="text-[10px] text-[#C86D51] font-medium flex items-center gap-1 mt-0.5">
+                          <Calendar className="w-2.5 h-2.5" />
+                          Entrega est.: {formatDate(sale.deliveryDate)}
+                        </p>
+                      )}
                       {sale.notes && (
                         <p className="text-[11px] text-[#8E7E73] italic mt-0.5">{sale.notes}</p>
                       )}
@@ -477,11 +571,46 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     <td className="py-3 px-4 text-center whitespace-nowrap font-semibold">
                       x{sale.quantity}
                     </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap font-bold text-sm text-[#2E6B4A]">
-                      +{formatCurrency(sale.totalAmount)}
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                      <p className="font-bold text-sm text-[#2E6B4A]">
+                        +{formatCurrency(sale.totalAmount)}
+                      </p>
+                      {sale.isCustomOrder && (
+                        <div className="text-[10px] text-right mt-0.5">
+                          {!sale.isFullyPaid ? (
+                            <>
+                              <span className="text-[#2E7D32] font-semibold block">
+                                Seña: +{formatCurrency(sale.depositAmount || 0)}
+                              </span>
+                              <span className="text-[#E65100] font-bold block">
+                                Resta: {formatCurrency(Math.max(0, sale.totalAmount - (sale.depositAmount || 0)))}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-[#2E7D32] font-medium inline-flex items-center gap-0.5">
+                              <CheckCircle2 className="w-2.5 h-2.5" />
+                              100% Abonado
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1.5">
+                        {sale.isCustomOrder && !sale.isFullyPaid && (
+                          <button
+                            onClick={() => {
+                              const rest = Math.max(0, sale.totalAmount - (sale.depositAmount || 0));
+                              if (window.confirm(`¿Marcar encargo de "${sale.productName}" como totalmente abonado? Se cobrará el saldo restante de ${formatCurrency(rest)}.`)) {
+                                markSaleFullyPaid(sale.id);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-[#2E6B4A] hover:bg-[#E8F5E9] transition-colors"
+                            title="Cobrar saldo restante y marcar como saldado"
+                          >
+                            <Coins className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleOpenEdit(sale)}
                           className="p-1.5 rounded-lg text-[#8E7E73] hover:text-[#2D231E] hover:bg-[#F2ECE4] transition-colors"
@@ -810,6 +939,178 @@ export const SalesView: React.FC<SalesViewProps> = ({
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs"
                 />
+              </div>
+
+              {/* Opcional: Venta por Encargo con Seña */}
+              <div className="p-3.5 sm:p-4 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-[#5C4F47] text-xs flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={formData.isCustomOrder}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setFormData(prev => ({
+                          ...prev,
+                          isCustomOrder: checked,
+                          depositAmount: checked && !prev.depositAmount && modalTotalAmount > 0
+                            ? (Math.round(modalTotalAmount * 0.5)).toString()
+                            : prev.depositAmount,
+                          isFullyPaid: false,
+                        }));
+                      }}
+                      className="w-4 h-4 rounded text-[#2E6B4A] focus:ring-[#2E6B4A] border-[#DFCBB9] cursor-pointer"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-[#C86D51]" />
+                      <span className="text-[#2D231E]">¿Es una pieza por encargo con seña?</span>
+                    </div>
+                  </label>
+                  {formData.isCustomOrder && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FFF3E0] text-[#E65100] px-2 py-0.5 rounded-full border border-[#FFE0B2]">
+                      Por Encargo
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-[#7D6E63] leading-relaxed">
+                  Activá esta opción si te encargaron una pieza personalizada y te dejaron una seña previa, para controlar el saldo pendiente a cobrar cuando esté terminada.
+                </p>
+
+                {formData.isCustomOrder && (
+                  <div className="pt-2 border-t border-[#EFE7DE] space-y-3 animate-in fade-in duration-150">
+                    {/* Input Seña Recibida & Fecha Entrega */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
+                          Monto de la Seña Recibida ($) *
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-[#8E7E73]">$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Ej: 20000"
+                            value={formData.depositAmount}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const valNum = parseFloat(val) || 0;
+                              setFormData(prev => ({
+                                ...prev,
+                                depositAmount: val,
+                                isFullyPaid: modalTotalAmount > 0 && valNum >= modalTotalAmount,
+                              }));
+                            }}
+                            className="w-full pl-8 pr-3.5 py-2 rounded-xl border border-[#DFCBB9] bg-white focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs font-bold text-[#2D231E]"
+                          />
+                        </div>
+
+                        {/* Atajos rápidos de porcentaje de seña */}
+                        {modalTotalAmount > 0 && (
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            <span className="text-[10px] text-[#8E7E73]">Sugerir:</span>
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                depositAmount: (Math.round(modalTotalAmount * 0.5)).toString(),
+                                isFullyPaid: false,
+                              }))}
+                              className="px-1.5 py-0.5 text-[10px] font-semibold bg-white hover:bg-[#EFE7DE] rounded border border-[#DFCBB9] text-[#5C4F47] transition-colors"
+                            >
+                              50% ({formatCurrency(Math.round(modalTotalAmount * 0.5))})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                depositAmount: (Math.round(modalTotalAmount * 0.3)).toString(),
+                                isFullyPaid: false,
+                              }))}
+                              className="px-1.5 py-0.5 text-[10px] font-semibold bg-white hover:bg-[#EFE7DE] rounded border border-[#DFCBB9] text-[#5C4F47] transition-colors"
+                            >
+                              30% ({formatCurrency(Math.round(modalTotalAmount * 0.3))})
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1">
+                          Fecha estimada de entrega (Opcional)
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.deliveryDate}
+                          onChange={(e) => setFormData(prev => ({ ...prev, deliveryDate: e.target.value }))}
+                          className="w-full px-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Resumen dinámico del encargo */}
+                    <div className="p-3 bg-white rounded-xl border border-[#DFCBB9] grid grid-cols-3 gap-2 text-center text-xs">
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#8E7E73] uppercase">Total Pieza</p>
+                        <p className="font-bold text-[#2D231E] mt-0.5">{formatCurrency(modalTotalAmount)}</p>
+                      </div>
+                      <div className="border-x border-[#F2ECE4]">
+                        <p className="text-[10px] font-semibold text-[#2E7D32] uppercase">Seña Cobrada</p>
+                        <p className="font-bold text-[#2E7D32] mt-0.5">+{formatCurrency(modalDepositNum)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#E65100] uppercase">Saldo Restante</p>
+                        <p className={`font-bold mt-0.5 ${modalRemainingBalance > 0 ? 'text-[#E65100]' : 'text-[#2E7D32]'}`}>
+                          {modalRemainingBalance > 0 ? formatCurrency(modalRemainingBalance) : '$0 (Saldado)'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Selector de estado del saldo */}
+                    <div className="pt-1">
+                      <label className="block text-[11px] font-semibold text-[#7D6E63] mb-1.5">
+                        Estado actual del pago:
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, isFullyPaid: false }))}
+                          className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all ${
+                            !formData.isFullyPaid
+                              ? 'bg-[#FFF8E1] border-[#FFB300] text-[#7A4F01] shadow-2xs font-bold'
+                              : 'bg-white border-[#DFCBB9] text-[#7D6E63] hover:bg-[#FAF7F2]'
+                          }`}
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${!formData.isFullyPaid ? 'border-[#FFB300] bg-[#FFB300]' : 'border-[#A8988D]'}`}>
+                            {!formData.isFullyPaid && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate">Solo Seña Abonada</p>
+                            <p className="text-[10px] font-normal opacity-85">Resta cobrar saldo al entregar</p>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, isFullyPaid: true }))}
+                          className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all ${
+                            formData.isFullyPaid
+                              ? 'bg-[#E8F5E9] border-[#4CAF50] text-[#1B5E20] shadow-2xs font-bold'
+                              : 'bg-white border-[#DFCBB9] text-[#7D6E63] hover:bg-[#FAF7F2]'
+                          }`}
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${formData.isFullyPaid ? 'border-[#4CAF50] bg-[#4CAF50]' : 'border-[#A8988D]'}`}>
+                            {formData.isFullyPaid && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate">Pagado 100% (Completado)</p>
+                            <p className="text-[10px] font-normal opacity-85">Pieza terminada y cobrada</p>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Datos de la Compradora / Cliente con Buscador y Directorio */}
