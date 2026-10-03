@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { Expense, Sale, Workshop, Client, Reservation, DepositStatus, PaymentMethod, Article } from '../types';
+import { supabase } from '../lib/supabase';
 
 const STORAGE_KEY = 'macrame_aurora_data_v1';
+
+export type CloudSyncStatus = 'synced' | 'connecting' | 'local_only' | 'error' | 'syncing';
 
 interface DataContextType {
   expenses: Expense[];
@@ -9,6 +12,13 @@ interface DataContextType {
   workshops: Workshop[];
   clients: Client[];
   articles: Article[];
+
+  // Cloud Sync
+  cloudSyncStatus: CloudSyncStatus;
+  lastSyncTime: string | null;
+  syncLocalToCloud: () => Promise<{ success: boolean; message: string }>;
+  syncCloudToLocal: () => Promise<{ success: boolean; message: string }>;
+  checkCloudConnection: () => Promise<boolean>;
   
   // Articles CRUD
   addArticle: (article: Omit<Article, 'id' | 'createdAt'>) => Article;
@@ -541,6 +551,255 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(STORAGE_KEY + '_articles', JSON.stringify(articles));
   }, [articles]);
 
+  // Cloud Sync Status & Operations
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('connecting');
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+
+  const safeDbOp = (operation: PromiseLike<any>) => {
+    Promise.resolve(operation)
+      .then(res => {
+        if (res && typeof res === 'object' && 'error' in res && res.error) {
+          console.warn('Supabase DB error:', res.error);
+        }
+      })
+      .catch(err => {
+        console.warn('Supabase network error:', err);
+      });
+  };
+
+  const checkCloudConnection = useCallback(async (): Promise<boolean> => {
+    try {
+      const { error } = await supabase.from('sales').select('id').limit(1);
+      if (error) {
+        if (error.code === 'PGRST205' || error.message.includes('not find')) {
+          setCloudSyncStatus('local_only');
+        } else {
+          setCloudSyncStatus('error');
+        }
+        return false;
+      }
+      setCloudSyncStatus('synced');
+      return true;
+    } catch {
+      setCloudSyncStatus('error');
+      return false;
+    }
+  }, []);
+
+  const syncLocalToCloud = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setCloudSyncStatus('syncing');
+    try {
+      const promises: Promise<any>[] = [];
+      if (articles.length > 0) promises.push(Promise.resolve(supabase.from('articles').upsert(articles)));
+      if (clients.length > 0) promises.push(Promise.resolve(supabase.from('clients').upsert(clients)));
+      if (expenses.length > 0) promises.push(Promise.resolve(supabase.from('expenses').upsert(expenses)));
+      if (sales.length > 0) promises.push(Promise.resolve(supabase.from('sales').upsert(sales)));
+      if (workshops.length > 0) promises.push(Promise.resolve(supabase.from('workshops').upsert(workshops)));
+
+      const results = await Promise.all(promises);
+      const errors = results.filter(r => r.error);
+
+      if (errors.length > 0) {
+        const msg = errors.map(e => e.error?.message).join(' | ');
+        setCloudSyncStatus('error');
+        return { success: false, message: `Error al subir datos a Supabase: ${msg}` };
+      }
+
+      setCloudSyncStatus('synced');
+      setLastSyncTime(new Date().toLocaleTimeString());
+      return { 
+        success: true, 
+        message: `¡Sincronización exitosa! Se subieron ${articles.length} artículos, ${clients.length} clientes, ${expenses.length} gastos, ${sales.length} ventas y ${workshops.length} talleres.` 
+      };
+    } catch (err: any) {
+      setCloudSyncStatus('error');
+      return { success: false, message: err?.message || 'Error al conectar con Supabase' };
+    }
+  }, [articles, clients, expenses, sales, workshops]);
+
+  const syncCloudToLocal = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setCloudSyncStatus('syncing');
+    try {
+      const [resArticles, resClients, resExpenses, resSales, resWorkshops] = await Promise.all([
+        supabase.from('articles').select('*'),
+        supabase.from('clients').select('*'),
+        supabase.from('expenses').select('*'),
+        supabase.from('sales').select('*'),
+        supabase.from('workshops').select('*'),
+      ]);
+
+      const errors = [resArticles, resClients, resExpenses, resSales, resWorkshops].filter(r => r.error);
+      if (errors.length > 0) {
+        const msg = errors.map(e => e.error?.message).join(' | ');
+        setCloudSyncStatus('error');
+        return { success: false, message: `Error al descargar datos de Supabase: ${msg}` };
+      }
+
+      if (resArticles.data && resArticles.data.length > 0) setArticles(resArticles.data as Article[]);
+      if (resClients.data && resClients.data.length > 0) setClients(resClients.data as Client[]);
+      if (resExpenses.data && resExpenses.data.length > 0) setExpenses(resExpenses.data as Expense[]);
+      if (resSales.data && resSales.data.length > 0) setSales(resSales.data as Sale[]);
+      if (resWorkshops.data && resWorkshops.data.length > 0) setWorkshops(resWorkshops.data as Workshop[]);
+
+      setCloudSyncStatus('synced');
+      setLastSyncTime(new Date().toLocaleTimeString());
+      return { success: true, message: '¡Datos descargados desde Supabase y actualizados con éxito!' };
+    } catch (err: any) {
+      setCloudSyncStatus('error');
+      return { success: false, message: err?.message || 'Error al descargar datos' };
+    }
+  }, []);
+
+  // Initial cloud fetch on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFromCloud = async () => {
+      setCloudSyncStatus('connecting');
+      try {
+        const [resArticles, resClients, resExpenses, resSales, resWorkshops] = await Promise.all([
+          supabase.from('articles').select('*'),
+          supabase.from('clients').select('*'),
+          supabase.from('expenses').select('*'),
+          supabase.from('sales').select('*'),
+          supabase.from('workshops').select('*'),
+        ]);
+
+        if (!isMounted) return;
+
+        const anyMissingTable = [resArticles, resClients, resExpenses, resSales, resWorkshops].some(
+          r => r.error && (r.error.message.includes('not find') || r.error.code === '42P01' || r.error.code === 'PGRST205')
+        );
+
+        if (anyMissingTable) {
+          console.info('Supabase: Tablas pendientes de creación. Operando en modo local.');
+          setCloudSyncStatus('local_only');
+          return;
+        }
+
+        const errors = [resArticles, resClients, resExpenses, resSales, resWorkshops].filter(r => r.error);
+        if (errors.length > 0) {
+          console.warn('Error al consultar Supabase:', errors);
+          setCloudSyncStatus('error');
+          return;
+        }
+
+        const cArticles = (resArticles.data as Article[]) || [];
+        const cClients = (resClients.data as Client[]) || [];
+        const cExpenses = (resExpenses.data as Expense[]) || [];
+        const cSales = (resSales.data as Sale[]) || [];
+        const cWorkshops = (resWorkshops.data as Workshop[]) || [];
+
+        const totalCloudCount = cArticles.length + cClients.length + cExpenses.length + cSales.length + cWorkshops.length;
+
+        if (totalCloudCount > 0) {
+          if (cArticles.length > 0) setArticles(cArticles);
+          if (cClients.length > 0) setClients(cClients);
+          if (cExpenses.length > 0) setExpenses(cExpenses);
+          if (cSales.length > 0) setSales(cSales);
+          if (cWorkshops.length > 0) setWorkshops(cWorkshops);
+          setCloudSyncStatus('synced');
+          setLastSyncTime(new Date().toLocaleTimeString());
+        } else {
+          // If tables are empty, sync local state to Supabase
+          console.info('Supabase: Tablas vacías detectadas. Subiendo datos locales...');
+          const promises: Promise<any>[] = [];
+          if (articles.length > 0) promises.push(Promise.resolve(supabase.from('articles').upsert(articles)));
+          if (clients.length > 0) promises.push(Promise.resolve(supabase.from('clients').upsert(clients)));
+          if (expenses.length > 0) promises.push(Promise.resolve(supabase.from('expenses').upsert(expenses)));
+          if (sales.length > 0) promises.push(Promise.resolve(supabase.from('sales').upsert(sales)));
+          if (workshops.length > 0) promises.push(Promise.resolve(supabase.from('workshops').upsert(workshops)));
+          if (promises.length > 0) {
+            await Promise.all(promises);
+          }
+          setCloudSyncStatus('synced');
+          setLastSyncTime(new Date().toLocaleTimeString());
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        console.warn('Fallo de conexión inicial con Supabase:', err);
+        setCloudSyncStatus('error');
+      }
+    };
+
+    loadFromCloud();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Real-time synchronization subscription
+  useEffect(() => {
+    const channel = supabase
+      .channel('aurora_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new as Sale;
+          setSales(prev => (prev.some(s => s.id === newRow.id) ? prev : [newRow, ...prev]));
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedRow = payload.new as Sale;
+          setSales(prev => prev.map(s => (s.id === updatedRow.id ? updatedRow : s)));
+        } else if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as { id: string };
+          setSales(prev => prev.filter(s => s.id !== oldRow.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new as Expense;
+          setExpenses(prev => (prev.some(e => e.id === newRow.id) ? prev : [newRow, ...prev]));
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedRow = payload.new as Expense;
+          setExpenses(prev => prev.map(e => (e.id === updatedRow.id ? updatedRow : e)));
+        } else if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as { id: string };
+          setExpenses(prev => prev.filter(e => e.id !== oldRow.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new as Article;
+          setArticles(prev => (prev.some(a => a.id === newRow.id) ? prev : [...prev, newRow]));
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedRow = payload.new as Article;
+          setArticles(prev => prev.map(a => (a.id === updatedRow.id ? updatedRow : a)));
+        } else if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as { id: string };
+          setArticles(prev => prev.filter(a => a.id !== oldRow.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new as Client;
+          setClients(prev => (prev.some(c => c.id === newRow.id) ? prev : [newRow, ...prev]));
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedRow = payload.new as Client;
+          setClients(prev => prev.map(c => (c.id === updatedRow.id ? updatedRow : c)));
+        } else if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as { id: string };
+          setClients(prev => prev.filter(c => c.id !== oldRow.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workshops' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new as Workshop;
+          setWorkshops(prev => (prev.some(w => w.id === newRow.id) ? prev : [newRow, ...prev]));
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedRow = payload.new as Workshop;
+          setWorkshops(prev => prev.map(w => (w.id === updatedRow.id ? updatedRow : w)));
+        } else if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as { id: string };
+          setWorkshops(prev => prev.filter(w => w.id !== oldRow.id));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   // Articles CRUD
   const addArticle = (articleData: Omit<Article, 'id' | 'createdAt'>): Article => {
     const newArticle: Article = {
@@ -549,19 +808,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date().toISOString().slice(0, 10),
     };
     setArticles(prev => [...prev, newArticle]);
+    safeDbOp(supabase.from('articles').insert(newArticle));
     return newArticle;
   };
 
   const updateArticle = (id: string, data: Partial<Article>) => {
     setArticles(prev => prev.map(a => (a.id === id ? { ...a, ...data } : a)));
+    safeDbOp(supabase.from('articles').update(data).eq('id', id));
   };
 
   const deleteArticle = (id: string) => {
     setArticles(prev => prev.filter(a => a.id !== id));
+    safeDbOp(supabase.from('articles').delete().eq('id', id));
   };
 
   const resetArticlesToExcel = () => {
     setArticles(excelArticles);
+    safeDbOp(supabase.from('articles').upsert(excelArticles));
   };
 
   // Clients
@@ -572,15 +835,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date().toISOString().slice(0, 10),
     };
     setClients(prev => [newClient, ...prev]);
+    safeDbOp(supabase.from('clients').insert(newClient));
     return newClient;
   };
 
   const updateClient = (id: string, data: Partial<Client>) => {
     setClients(prev => prev.map(c => (c.id === id ? { ...c, ...data } : c)));
+    safeDbOp(supabase.from('clients').update(data).eq('id', id));
   };
 
   const deleteClient = (id: string) => {
     setClients(prev => prev.filter(c => c.id !== id));
+    safeDbOp(supabase.from('clients').delete().eq('id', id));
   };
 
   const findOrCreateClient = (name: string, phone: string, email?: string): Client => {
@@ -601,15 +867,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       id: 'exp-' + Date.now(),
     };
     setExpenses(prev => [newExpense, ...prev]);
+    safeDbOp(supabase.from('expenses').insert(newExpense));
     return newExpense;
   };
 
   const updateExpense = (id: string, data: Partial<Expense>) => {
     setExpenses(prev => prev.map(e => (e.id === id ? { ...e, ...data } : e)));
+    safeDbOp(supabase.from('expenses').update(data).eq('id', id));
   };
 
   const deleteExpense = (id: string) => {
     setExpenses(prev => prev.filter(e => e.id !== id));
+    safeDbOp(supabase.from('expenses').delete().eq('id', id));
   };
 
   // Sales
@@ -623,19 +892,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       findOrCreateClient(saleData.customerName, saleData.customerPhone || '');
     }
     setSales(prev => [newSale, ...prev]);
+    safeDbOp(supabase.from('sales').insert(newSale));
     return newSale;
   };
 
   const updateSale = (id: string, data: Partial<Sale>) => {
     setSales(prev => prev.map(s => (s.id === id ? { ...s, ...data } : s)));
+    safeDbOp(supabase.from('sales').update(data).eq('id', id));
   };
 
   const deleteSale = (id: string) => {
     setSales(prev => prev.filter(s => s.id !== id));
+    safeDbOp(supabase.from('sales').delete().eq('id', id));
   };
 
   const markSaleFullyPaid = (id: string) => {
     setSales(prev => prev.map(s => (s.id === id ? { ...s, isFullyPaid: true } : s)));
+    safeDbOp(supabase.from('sales').update({ isFullyPaid: true }).eq('id', id));
   };
 
   // Workshops
@@ -646,15 +919,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       reservations: [],
     };
     setWorkshops(prev => [newWorkshop, ...prev]);
+    safeDbOp(supabase.from('workshops').insert(newWorkshop));
     return newWorkshop;
   };
 
   const updateWorkshop = (id: string, data: Partial<Workshop>) => {
     setWorkshops(prev => prev.map(w => (w.id === id ? { ...w, ...data } : w)));
+    safeDbOp(supabase.from('workshops').update(data).eq('id', id));
   };
 
   const deleteWorkshop = (id: string) => {
     setWorkshops(prev => prev.filter(w => w.id !== id));
+    safeDbOp(supabase.from('workshops').delete().eq('id', id));
   };
 
   // Reservations
@@ -707,17 +983,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registeredAt: new Date().toISOString(),
     };
 
+    const updatedReservations = [...workshop.reservations, newReservation];
     setWorkshops(prev =>
-      prev.map(w => {
-        if (w.id === workshopId) {
-          return {
-            ...w,
-            reservations: [...w.reservations, newReservation],
-          };
-        }
-        return w;
-      })
+      prev.map(w => (w.id === workshopId ? { ...w, reservations: updatedReservations } : w))
     );
+    safeDbOp(supabase.from('workshops').update({ reservations: updatedReservations }).eq('id', workshopId));
 
     return {
       success: true,
@@ -727,43 +997,37 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateReservation = (workshopId: string, reservationId: string, data: Partial<Reservation>) => {
-    setWorkshops(prev =>
-      prev.map(w => {
-        if (w.id === workshopId) {
-          return {
-            ...w,
-            reservations: w.reservations.map(r => {
-              if (r.id === reservationId) {
-                const updated = { ...r, ...data };
-                // Recalculate remaining balance and paid state if deposit changes
-                if (data.depositAmount !== undefined || data.totalPrice !== undefined || data.depositStatus !== undefined) {
-                  const effectiveDeposit = updated.depositStatus === 'Pagada' ? updated.depositAmount : 0;
-                  updated.remainingBalance = Math.max(0, updated.totalPrice - effectiveDeposit);
-                  updated.isFullyPaid = effectiveDeposit >= updated.totalPrice;
-                }
-                return updated;
-              }
-              return r;
-            }),
-          };
+    const workshop = workshops.find(w => w.id === workshopId);
+    if (!workshop) return;
+
+    const updatedReservations = workshop.reservations.map(r => {
+      if (r.id === reservationId) {
+        const updated = { ...r, ...data };
+        if (data.depositAmount !== undefined || data.totalPrice !== undefined || data.depositStatus !== undefined) {
+          const effectiveDeposit = updated.depositStatus === 'Pagada' ? updated.depositAmount : 0;
+          updated.remainingBalance = Math.max(0, updated.totalPrice - effectiveDeposit);
+          updated.isFullyPaid = effectiveDeposit >= updated.totalPrice;
         }
-        return w;
-      })
+        return updated;
+      }
+      return r;
+    });
+
+    setWorkshops(prev =>
+      prev.map(w => (w.id === workshopId ? { ...w, reservations: updatedReservations } : w))
     );
+    safeDbOp(supabase.from('workshops').update({ reservations: updatedReservations }).eq('id', workshopId));
   };
 
   const deleteReservation = (workshopId: string, reservationId: string) => {
+    const workshop = workshops.find(w => w.id === workshopId);
+    if (!workshop) return;
+
+    const updatedReservations = workshop.reservations.filter(r => r.id !== reservationId);
     setWorkshops(prev =>
-      prev.map(w => {
-        if (w.id === workshopId) {
-          return {
-            ...w,
-            reservations: w.reservations.filter(r => r.id !== reservationId),
-          };
-        }
-        return w;
-      })
+      prev.map(w => (w.id === workshopId ? { ...w, reservations: updatedReservations } : w))
     );
+    safeDbOp(supabase.from('workshops').update({ reservations: updatedReservations }).eq('id', workshopId));
   };
 
   // Backup & Reset
@@ -797,11 +1061,30 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const importJSONBackup = (jsonData: string): boolean => {
     try {
       const parsed = JSON.parse(jsonData);
-      if (parsed.expenses) setExpenses(parsed.expenses);
-      if (parsed.sales) setSales(parsed.sales);
-      if (parsed.workshops) setWorkshops(parsed.workshops);
-      if (parsed.clients) setClients(parsed.clients);
-      if (parsed.articles) setArticles(parsed.articles);
+      if (parsed.expenses && Array.isArray(parsed.expenses)) setExpenses(parsed.expenses);
+      if (parsed.sales && Array.isArray(parsed.sales)) setSales(parsed.sales);
+      if (parsed.workshops && Array.isArray(parsed.workshops)) setWorkshops(parsed.workshops);
+      if (parsed.clients && Array.isArray(parsed.clients)) setClients(parsed.clients);
+      if (parsed.articles && Array.isArray(parsed.articles)) setArticles(parsed.articles);
+
+      // Async push to Supabase if connected
+      const promises: Promise<any>[] = [];
+      if (parsed.articles?.length) promises.push(Promise.resolve(supabase.from('articles').upsert(parsed.articles)));
+      if (parsed.clients?.length) promises.push(Promise.resolve(supabase.from('clients').upsert(parsed.clients)));
+      if (parsed.expenses?.length) promises.push(Promise.resolve(supabase.from('expenses').upsert(parsed.expenses)));
+      if (parsed.sales?.length) promises.push(Promise.resolve(supabase.from('sales').upsert(parsed.sales)));
+      if (parsed.workshops?.length) promises.push(Promise.resolve(supabase.from('workshops').upsert(parsed.workshops)));
+      if (promises.length > 0) {
+        Promise.all(promises)
+          .then(res => {
+            const hasErr = res.some(r => r.error);
+            if (!hasErr) {
+              setCloudSyncStatus('synced');
+              setLastSyncTime(new Date().toLocaleTimeString());
+            }
+          })
+          .catch(console.warn);
+      }
       return true;
     } catch (err) {
       console.error('Error importing backup:', err);
@@ -817,6 +1100,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         workshops,
         clients,
         articles,
+        cloudSyncStatus,
+        lastSyncTime,
+        syncLocalToCloud,
+        syncCloudToLocal,
+        checkCloudConnection,
         addArticle,
         updateArticle,
         deleteArticle,
@@ -855,3 +1143,4 @@ export const useData = () => {
   }
   return context;
 };
+
