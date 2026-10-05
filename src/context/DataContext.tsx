@@ -693,11 +693,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const totalCloudCount = cArticles.length + cClients.length + cExpenses.length + cSales.length + cWorkshops.length;
 
         if (totalCloudCount > 0) {
-          if (cArticles.length > 0) setArticles(cArticles);
-          if (cClients.length > 0) setClients(cClients);
-          if (cExpenses.length > 0) setExpenses(cExpenses);
-          if (cSales.length > 0) setSales(cSales);
-          if (cWorkshops.length > 0) setWorkshops(cWorkshops);
+          setArticles(cArticles);
+          setClients(cClients);
+          setExpenses(cExpenses);
+          setSales(cSales);
+          setWorkshops(cWorkshops);
           setCloudSyncStatus('synced');
           setLastSyncTime(new Date().toLocaleTimeString());
         } else {

@@ -7,13 +7,8 @@ import {
   Package,
   Users, 
   Download, 
-  Sparkles,
-  Cloud,
-  CloudOff,
-  RefreshCw,
-  AlertTriangle
+  Sparkles
 } from 'lucide-react';
-import { useData } from '../context/DataContext';
 import { InstagramIcon } from './InstagramIcon';
 
 export type ActiveTab = 'dashboard' | 'talleres' | 'ventas' | 'gastos' | 'articulos' | 'clientes' | 'reportes';
@@ -29,48 +24,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   pendingDepositsCount 
 }) => {
-  const { cloudSyncStatus } = useData();
-
-  const getCloudBadge = () => {
-    switch (cloudSyncStatus) {
-      case 'synced':
-        return {
-          icon: <Cloud className="w-3.5 h-3.5 text-[#16A34A]" />,
-          text: 'Nube Sincronizada',
-          shortText: 'Nube OK',
-          bg: 'bg-[#F0FDF4] hover:bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]',
-          title: 'Conectado a Supabase en tiempo real. Todos los cambios están respaldados en la nube.',
-        };
-      case 'syncing':
-      case 'connecting':
-        return {
-          icon: <RefreshCw className="w-3.5 h-3.5 text-[#E65100] animate-spin" />,
-          text: 'Sincronizando...',
-          shortText: 'Sincronizando',
-          bg: 'bg-[#FFF8E1] hover:bg-[#FEF08A] text-[#854D0E] border-[#FEF08A]',
-          title: 'Conectando con Supabase...',
-        };
-      case 'local_only':
-        return {
-          icon: <AlertTriangle className="w-3.5 h-3.5 text-[#D97706]" />,
-          text: 'Tablas Pendientes',
-          shortText: 'Configurar Nube',
-          bg: 'bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]',
-          title: 'Falta ejecutar el script SQL en Supabase para activar la sincronización permanente.',
-        };
-      case 'error':
-      default:
-        return {
-          icon: <CloudOff className="w-3.5 h-3.5 text-[#DC2626]" />,
-          text: 'Sin Conexión Nube',
-          shortText: 'Modo Local',
-          bg: 'bg-[#FEF2F2] hover:bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]',
-          title: 'No se pudo conectar a la base de datos de Supabase. Operando con copia local.',
-        };
-    }
-  };
-
-  const cloudBadge = getCloudBadge();
   const navItems = [
     { id: 'dashboard', label: 'Panel General', icon: LayoutDashboard },
     { 
@@ -148,26 +101,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Cloud Status & Instagram Button */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={() => setActiveTab('reportes')}
-              title={cloudBadge.title}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold border transition-all active:scale-95 shadow-2xs cursor-pointer ${cloudBadge.bg}`}
-            >
-              {cloudBadge.icon}
-              <span className="hidden sm:inline">{cloudBadge.text}</span>
-              <span className="inline sm:hidden">{cloudBadge.shortText}</span>
-            </button>
-
+          {/* Instagram Button */}
+          <div className="flex items-center gap-3">
             <a
               href="https://www.instagram.com/macrameaurora_/"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-gradient-to-r from-[#FDEEEA] to-[#F7E7DE] border border-[#EACEC1] text-[#93452E] hover:text-[#7A3622] hover:border-[#D9A390] text-xs font-semibold transition-all shadow-2xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-[#FDEEEA] to-[#F7E7DE] border border-[#EACEC1] text-[#93452E] hover:text-[#7A3622] hover:border-[#D9A390] text-xs font-semibold transition-all shadow-2xs"
             >
               <InstagramIcon className="w-3.5 h-3.5 text-[#C86D51]" />
-              <span className="hidden lg:inline">@macrameaurora_</span>
+              <span className="hidden sm:inline">@macrameaurora_</span>
             </a>
           </div>
 

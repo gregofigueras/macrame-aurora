@@ -14,7 +14,7 @@ import { InstagramIcon } from './components/InstagramIcon';
 
 
 const MainContent: React.FC = () => {
-  const { workshops } = useData();
+  const { workshops, cloudSyncStatus } = useData();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
@@ -34,8 +34,15 @@ const MainContent: React.FC = () => {
     });
   });
 
+  const isSyncing = cloudSyncStatus === 'connecting' || cloudSyncStatus === 'syncing';
+
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-[#2D231E] flex flex-col font-sans selection:bg-[#E2876D] selection:text-white">
+      {/* Subtle Top Sync Indicator Line */}
+      {isSyncing && (
+        <div className="fixed top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#C86D51] to-transparent z-50 animate-pulse pointer-events-none" />
+      )}
+
       {/* Navbar Header */}
       <Navbar
         activeTab={activeTab}
