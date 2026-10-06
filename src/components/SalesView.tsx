@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import type { Sale, ProductCategory, PaymentMethod, Client, Article } from '../types';
+import type { Sale, ProductCategory, PaymentMethod, Client, Article, SaleItem } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { exportSalesToCSV } from '../utils/exportCsv';
 import { 
@@ -22,7 +22,9 @@ import {
   Clock,
   Coins,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Minus,
+  Plus
 } from 'lucide-react';
 
 const PRODUCT_CATEGORIES: ProductCategory[] = [
@@ -68,20 +70,22 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [isClientDirectoryOpen, setIsClientDirectoryOpen] = useState(false);
   const [directorySearchQuery, setDirectorySearchQuery] = useState('');
 
-  // Article selection state
-  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  // Article selection state & multi-item shopping list
+  const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
+  const [itemsError, setItemsError] = useState<string | null>(null);
   const [articleSearchQuery, setArticleSearchQuery] = useState('');
   const [isArticleSelectorOpen, setIsArticleSelectorOpen] = useState(false);
   const [isCustomProductMode, setIsCustomProductMode] = useState(false);
 
-  // Form state
+  // Manual custom item form inputs
+  const [customItemName, setCustomItemName] = useState('');
+  const [customItemCategory, setCustomItemCategory] = useState<ProductCategory>('Canastas');
+  const [customItemUnitPrice, setCustomItemUnitPrice] = useState('');
+  const [customItemCost, setCustomItemCost] = useState('');
+  const [customItemQty, setCustomItemQty] = useState('1');
+
+  // Form state for sale-level properties
   const [formData, setFormData] = useState<{
-    articleId?: string;
-    productName: string;
-    category: ProductCategory;
-    quantity: number;
-    unitPrice: string;
-    estimatedCost?: number;
     date: string;
     paymentMethod: PaymentMethod;
     customerName: string;
@@ -92,12 +96,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
     isFullyPaid: boolean;
     deliveryDate: string;
   }>({
-    articleId: undefined,
-    productName: '',
-    category: 'Canastas',
-    quantity: 1,
-    unitPrice: '',
-    estimatedCost: undefined,
     date: new Date().toISOString().slice(0, 10),
     paymentMethod: 'Transferencia',
     customerName: '',
@@ -111,20 +109,20 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleOpenCreate = () => {
     setEditingSale(null);
-    setSelectedArticleId(null);
+    setSaleItems([]);
+    setItemsError(null);
     setArticleSearchQuery('');
     setIsArticleSelectorOpen(false);
     setIsCustomProductMode(false);
+    setCustomItemName('');
+    setCustomItemCategory('Canastas');
+    setCustomItemUnitPrice('');
+    setCustomItemCost('');
+    setCustomItemQty('1');
     setIsClientAssigned(false);
     setClientMode('search');
     setClientSearchQuery('');
     setFormData({
-      articleId: undefined,
-      productName: '',
-      category: 'Canastas',
-      quantity: 1,
-      unitPrice: '',
-      estimatedCost: undefined,
       date: new Date().toISOString().slice(0, 10),
       paymentMethod: 'Transferencia',
       customerName: '',
@@ -140,23 +138,34 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleOpenEdit = (sale: Sale) => {
     setEditingSale(sale);
-    const matched = articles.find(
-      a => a.id === sale.articleId || a.name.toLowerCase().trim() === sale.productName.toLowerCase().trim()
-    );
-    setSelectedArticleId(matched ? matched.id : (sale.articleId || null));
+    setItemsError(null);
+    if (sale.items && sale.items.length > 0) {
+      setSaleItems(sale.items.map(it => ({ ...it })));
+    } else {
+      // Legacy single-item fallback
+      setSaleItems([{
+        id: 'legacy-' + sale.id,
+        articleId: sale.articleId,
+        productName: sale.productName,
+        category: sale.category,
+        quantity: sale.quantity || 1,
+        unitPrice: sale.unitPrice || sale.totalAmount,
+        totalPrice: sale.totalAmount,
+        estimatedCost: sale.estimatedCost ? Math.round(sale.estimatedCost / (sale.quantity || 1)) : undefined,
+      }]);
+    }
     setArticleSearchQuery('');
     setIsArticleSelectorOpen(false);
-    setIsCustomProductMode(!matched && !sale.articleId && !!sale.productName);
+    setIsCustomProductMode(false);
+    setCustomItemName('');
+    setCustomItemCategory('Canastas');
+    setCustomItemUnitPrice('');
+    setCustomItemCost('');
+    setCustomItemQty('1');
     setIsClientAssigned(Boolean(sale.customerName && sale.customerName.trim().length > 0));
     setClientSearchQuery('');
     setClientMode('search');
     setFormData({
-      articleId: sale.articleId,
-      productName: sale.productName,
-      category: sale.category,
-      quantity: sale.quantity,
-      unitPrice: sale.unitPrice.toString(),
-      estimatedCost: sale.estimatedCost ? Math.round(sale.estimatedCost / sale.quantity) : undefined,
       date: sale.date,
       paymentMethod: sale.paymentMethod,
       customerName: sale.customerName || '',
@@ -170,23 +179,105 @@ export const SalesView: React.FC<SalesViewProps> = ({
     setIsModalOpen(true);
   };
 
-  const handleSelectArticle = (article: Article) => {
-    setSelectedArticleId(article.id);
-    setIsCustomProductMode(false);
-    setIsArticleSelectorOpen(false);
+  const handleAddCatalogArticle = (article: Article) => {
+    setItemsError(null);
+    setSaleItems(prev => {
+      const idx = prev.findIndex(item => item.articleId === article.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        const existing = updated[idx];
+        const newQty = existing.quantity + 1;
+        updated[idx] = {
+          ...existing,
+          quantity: newQty,
+          totalPrice: existing.unitPrice * newQty,
+        };
+        return updated;
+      } else {
+        const newItem: SaleItem = {
+          id: 'item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          articleId: article.id,
+          productName: article.name,
+          category: article.category,
+          quantity: 1,
+          unitPrice: article.price,
+          totalPrice: article.price,
+          estimatedCost: article.cost,
+        };
+        return [...prev, newItem];
+      }
+    });
     setArticleSearchQuery('');
-    setFormData(prev => ({
-      ...prev,
-      articleId: article.id,
-      productName: article.name,
-      category: article.category,
-      unitPrice: article.price.toString(),
-      estimatedCost: article.cost,
-    }));
+  };
+
+  const handleAddCustomItem = () => {
+    if (!customItemName.trim()) {
+      setItemsError('Por favor ingresa el nombre de la pieza o artículo personalizado.');
+      return;
+    }
+    const priceNum = parseFloat(customItemUnitPrice);
+    if (isNaN(priceNum) || priceNum <= 0) {
+      setItemsError('Por favor ingresa un precio de venta unitario válido.');
+      return;
+    }
+    const qtyNum = Math.max(1, parseInt(customItemQty) || 1);
+    const costNum = customItemCost ? parseFloat(customItemCost) : undefined;
+
+    const newItem: SaleItem = {
+      id: 'custom-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      productName: customItemName.trim(),
+      category: customItemCategory,
+      quantity: qtyNum,
+      unitPrice: priceNum,
+      totalPrice: priceNum * qtyNum,
+      estimatedCost: costNum,
+    };
+
+    setSaleItems(prev => [...prev, newItem]);
+    setCustomItemName('');
+    setCustomItemUnitPrice('');
+    setCustomItemCost('');
+    setCustomItemQty('1');
+    setIsCustomProductMode(false);
+    setItemsError(null);
+  };
+
+  const handleUpdateItemQuantity = (index: number, newQty: number) => {
+    if (newQty <= 0) {
+      handleRemoveItem(index);
+      return;
+    }
+    setSaleItems(prev => {
+      const updated = [...prev];
+      const it = updated[index];
+      updated[index] = {
+        ...it,
+        quantity: newQty,
+        totalPrice: it.unitPrice * newQty,
+      };
+      return updated;
+    });
+  };
+
+  const handleUpdateItemUnitPrice = (index: number, newPrice: number) => {
+    setSaleItems(prev => {
+      const updated = [...prev];
+      const it = updated[index];
+      const validPrice = Math.max(0, isNaN(newPrice) ? 0 : newPrice);
+      updated[index] = {
+        ...it,
+        unitPrice: validPrice,
+        totalPrice: validPrice * it.quantity,
+      };
+      return updated;
+    });
+  };
+
+  const handleRemoveItem = (index: number) => {
+    setSaleItems(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleCustomerNameChange = (nameVal: string) => {
-    // If the entered name matches an existing client exactly, auto-fill phone
     const exact = clients.find(c => c.name.toLowerCase().trim() === nameVal.toLowerCase().trim());
     setFormData(prev => ({
       ...prev,
@@ -217,25 +308,48 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.productName.trim() || !formData.unitPrice) return;
+    if (saleItems.length === 0) {
+      setItemsError('Debes agregar al menos un artículo a la venta.');
+      return;
+    }
 
-    const unitPriceNum = parseFloat(formData.unitPrice);
-    if (isNaN(unitPriceNum) || unitPriceNum <= 0) return;
+    const totalAmount = saleItems.reduce((acc, it) => acc + it.totalPrice, 0);
+    const totalQty = saleItems.reduce((acc, it) => acc + it.quantity, 0);
+    const totalCost = saleItems.reduce((acc, it) => acc + ((it.estimatedCost || 0) * it.quantity), 0);
+    const estimatedCost = totalCost > 0 ? totalCost : undefined;
 
-    const qty = Number(formData.quantity) || 1;
-    const totalAmount = unitPriceNum * qty;
-    const estimatedCost = formData.estimatedCost ? formData.estimatedCost * qty : undefined;
     const depositAmountNum = formData.isCustomOrder && formData.depositAmount ? parseFloat(formData.depositAmount) : undefined;
     const isFullyPaidVal = formData.isCustomOrder
       ? (formData.isFullyPaid || (depositAmountNum !== undefined && depositAmountNum >= totalAmount))
       : undefined;
 
+    let productName = '';
+    let category: ProductCategory = 'Canastas';
+    let unitPrice = totalAmount;
+    let articleId: string | undefined = undefined;
+
+    if (saleItems.length === 1) {
+      const single = saleItems[0];
+      productName = single.productName;
+      category = single.category || 'Otros';
+      unitPrice = single.unitPrice;
+      articleId = single.articleId;
+    } else {
+      productName = saleItems
+        .map(it => (it.quantity > 1 ? `${it.quantity}x ${it.productName}` : it.productName))
+        .join(', ');
+      const allSameCat = saleItems.every(it => it.category === saleItems[0].category);
+      category = allSameCat && saleItems[0].category ? saleItems[0].category : 'Otros';
+      unitPrice = totalAmount;
+    }
+
     const salePayload = {
-      articleId: formData.articleId,
-      productName: formData.productName.trim(),
-      category: formData.category,
-      quantity: qty,
-      unitPrice: unitPriceNum,
+      items: saleItems,
+      articleId,
+      productName,
+      category,
+      quantity: totalQty,
+      unitPrice,
       totalAmount,
       estimatedCost,
       date: formData.date,
@@ -338,10 +452,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
     );
   });
 
-  const currentSelectedArticle = articles.find(
-    a => a.id === selectedArticleId || a.name.toLowerCase().trim() === formData.productName.toLowerCase().trim()
-  );
-
   // Métricas de encargos y señas
   const totalCustomOrders = sales.filter(s => s.isCustomOrder).length;
   const pendingCustomOrders = sales.filter(s => s.isCustomOrder && !s.isFullyPaid);
@@ -354,10 +464,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
     0
   );
 
-  // Cálculos dinámicos en tiempo real para el modal
-  const modalUnitPriceNum = parseFloat(formData.unitPrice) || 0;
-  const modalQtyNum = Number(formData.quantity) || 1;
-  const modalTotalAmount = modalUnitPriceNum * modalQtyNum;
+  // Cálculos dinámicos en tiempo real para el modal desde la lista de artículos cargados
+  const modalTotalAmount = saleItems.reduce((acc, it) => acc + it.totalPrice, 0);
+  const modalTotalQuantity = saleItems.reduce((acc, it) => acc + it.quantity, 0);
+  const modalTotalCost = saleItems.reduce((acc, it) => acc + ((it.estimatedCost || 0) * it.quantity), 0);
   const modalDepositNum = parseFloat(formData.depositAmount) || 0;
   const modalRemainingBalance = Math.max(0, modalTotalAmount - modalDepositNum);
 
@@ -520,7 +630,15 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="font-bold text-[#2D231E]">{sale.productName}</p>
+                        {sale.items && sale.items.length > 1 ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FAF0E6] text-[#C86D51] border border-[#DFCBB9]">
+                              📦 {sale.items.length} artículos ({sale.quantity} u.)
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="font-bold text-[#2D231E]">{sale.productName}</p>
+                        )}
                         {sale.isCustomOrder && (
                           <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${
                             !sale.isFullyPaid
@@ -531,6 +649,23 @@ export const SalesView: React.FC<SalesViewProps> = ({
                           </span>
                         )}
                       </div>
+
+                      {/* Si tiene múltiples artículos, mostrar desglose visual de cada uno */}
+                      {sale.items && sale.items.length > 1 && (
+                        <div className="space-y-1 mt-1.5 max-w-xs sm:max-w-sm">
+                          {sale.items.map((it, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-[11px] bg-[#FAF7F2] px-2 py-0.5 rounded border border-[#EFE7DE]">
+                              <span className="text-[#5C4F47] truncate">
+                                <b className="text-[#C86D51] mr-1">{it.quantity}x</b>
+                                {it.productName}
+                              </span>
+                              <span className="font-semibold text-[#2D231E] ml-2 shrink-0">
+                                {formatCurrency(it.totalPrice)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {sale.deliveryDate && !sale.isFullyPaid && (
                         <p className="text-[10px] text-[#C86D51] font-medium flex items-center gap-1 mt-0.5">
                           <Calendar className="w-2.5 h-2.5" />
@@ -664,129 +799,170 @@ export const SalesView: React.FC<SalesViewProps> = ({
             {/* Form Body Scrolleable con scroll táctil suave */}
             <form id="sale-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-3.5 sm:space-y-4 text-xs">
               
-              {/* Selector de Artículo del Catálogo (A-Z) */}
-              <div className="p-3.5 sm:p-4 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3">
+              {/* Sección: Artículos de la Venta (Multi-artículo) */}
+              <div className="p-3.5 sm:p-4 bg-[#FAF7F2] rounded-2xl border border-[#DFCBB9] space-y-3.5">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <label className="font-bold text-[#5C4F47] text-xs flex items-center gap-1.5">
-                    <Package className="w-3.5 h-3.5 text-[#C86D51]" />
-                    <span>Artículo del Catálogo *</span>
-                    <span className="text-[10px] text-[#8E7E73] font-normal">
-                      ({sortedArticles.length} disponibles A-Z)
+                  <div className="flex items-center gap-1.5">
+                    <Package className="w-4 h-4 text-[#C86D51]" />
+                    <span className="font-bold text-[#2D231E] text-xs sm:text-sm">
+                      Artículos de la Venta ({saleItems.length})
                     </span>
-                  </label>
+                    <span className="text-[10px] font-semibold text-[#8E7E73] bg-[#EFE7DE] px-2 py-0.5 rounded-full">
+                      {modalTotalQuantity} unidades
+                    </span>
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => {
                       setIsCustomProductMode(!isCustomProductMode);
                       setIsArticleSelectorOpen(false);
-                      if (!isCustomProductMode) {
-                        setSelectedArticleId(null);
-                      }
+                      setItemsError(null);
                     }}
-                    className="text-[11px] text-[#C86D51] hover:underline font-semibold"
+                    className="text-[11px] text-[#C86D51] hover:underline font-bold"
                   >
-                    {isCustomProductMode ? '← Elegir de Artículos' : '+ Ingresar manual'}
+                    {isCustomProductMode ? '← Ver Catálogo A-Z' : '+ Cargar Pieza Personalizada'}
                   </button>
                 </div>
 
+                {/* Sub-formulario para agregar pieza personalizada fuera del catálogo */}
                 {isCustomProductMode ? (
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ej: Espejo Sol Bohemio 35cm, Canasta especial..."
-                      value={formData.productName}
-                      onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-white focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-sm"
-                    />
-                    <p className="text-[11px] text-[#8E7E73] italic">
-                      Ingreso manual fuera del catálogo cargado. Si es una pieza frecuente, te recomendamos agregarla en la pestaña "Artículos".
+                  <div className="p-3 bg-white rounded-xl border border-[#DFCBB9] space-y-2.5 animate-in fade-in">
+                    <p className="text-xs font-bold text-[#C86D51]">
+                      Agregar pieza o encargo fuera del catálogo:
                     </p>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#5C4F47] mb-1">
+                        Nombre del Artículo / Pieza *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Espejo Sol Bohemio 40cm, Tapiz especial hojas..."
+                        value={customItemName}
+                        onChange={(e) => setCustomItemName(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#5C4F47] mb-1">
+                          Categoría *
+                        </label>
+                        <select
+                          value={customItemCategory}
+                          onChange={(e) => setCustomItemCategory(e.target.value as ProductCategory)}
+                          className="w-full px-2 py-1.5 rounded-lg border border-[#DFCBB9] bg-[#FAF7F2] text-xs"
+                        >
+                          {PRODUCT_CATEGORIES.map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#5C4F47] mb-1">
+                          Precio Venta ($) *
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="Ej: 35000"
+                          value={customItemUnitPrice}
+                          onChange={(e) => setCustomItemUnitPrice(e.target.value)}
+                          className="w-full px-2 py-1.5 rounded-lg border border-[#DFCBB9] bg-[#FAF7F2] text-xs font-bold text-[#2E6B4A]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#5C4F47] mb-1">
+                          Cantidad *
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={customItemQty}
+                          onChange={(e) => setCustomItemQty(e.target.value)}
+                          className="w-full px-2 py-1.5 rounded-lg border border-[#DFCBB9] bg-[#FAF7F2] text-xs font-bold text-center"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#5C4F47] mb-1">
+                          Costo ($ opc.)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="Ej: 8000"
+                          value={customItemCost}
+                          onChange={(e) => setCustomItemCost(e.target.value)}
+                          className="w-full px-2 py-1.5 rounded-lg border border-[#DFCBB9] bg-[#FAF7F2] text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomProductMode(false)}
+                        className="px-3 py-1.5 text-xs text-[#7D6E63] hover:underline"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddCustomItem}
+                        className="px-4 py-1.5 bg-[#2E6B4A] hover:bg-[#25563B] text-white text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Agregar a la venta</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  formData.productName && !isArticleSelectorOpen ? (
-                    /* Tarjeta de Artículo Seleccionado */
-                    <div className="p-3 bg-white rounded-xl border border-[#C8E6C9] shadow-2xs space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2.5 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-[#E8F5E9] text-[#2E7D32] font-bold flex items-center justify-center text-xs shrink-0 mt-0.5">
-                            <Check className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-bold text-[#2E7D32] uppercase tracking-wider bg-[#E8F5E9] px-1.5 py-0.2 rounded">
-                                Artículo Seleccionado
-                              </span>
-                              {currentSelectedArticle?.threadType && (
-                                <span className="text-[10px] font-medium text-[#7D6E63] bg-[#EFE7DE] px-1.5 py-0.2 rounded">
-                                  {currentSelectedArticle.threadType}
-                                </span>
-                              )}
-                            </div>
-                            <p className="font-bold text-sm text-[#2D231E] mt-0.5 break-words">
-                              {formData.productName}
-                            </p>
-                          </div>
-                        </div>
-
+                  /* Buscador y Selector del Catálogo A-Z */
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
+                      <input
+                        type="text"
+                        placeholder="Buscar artículo en catálogo A-Z para sumar (ej: Bandeja, Cesto, Espejo...)"
+                        value={articleSearchQuery}
+                        onChange={(e) => {
+                          setArticleSearchQuery(e.target.value);
+                          setIsArticleSelectorOpen(true);
+                        }}
+                        onFocus={() => setIsArticleSelectorOpen(true)}
+                        className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
+                      />
+                      {articleSearchQuery && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setArticleSearchQuery('');
-                            setIsArticleSelectorOpen(true);
-                          }}
-                          className="px-2.5 py-1 text-xs font-semibold text-[#8E7E73] hover:text-[#2D231E] bg-[#FAF7F2] hover:bg-[#EFE7DE] rounded-lg border border-[#DFCBB9] transition-colors shrink-0"
+                          onClick={() => setArticleSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8E7E73] hover:text-[#2D231E]"
                         >
-                          Cambiar
+                          <X className="w-3.5 h-3.5" />
                         </button>
-                      </div>
-
-                      {/* Info de Costo y Ganancia Unitaria */}
-                      {currentSelectedArticle && (
-                        <div className="pt-2 border-t border-[#F2ECE4] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#5C4F47]">
-                          <div>
-                            <span>Costo material: <b>{formatCurrency(currentSelectedArticle.cost)}</b></span>
-                          </div>
-                          <div>
-                            <span>Precio catálogo: <b>{formatCurrency(currentSelectedArticle.price)}</b></span>
-                          </div>
-                          <div className="text-[#2E6B4A] font-bold">
-                            Ganancia est. u.: +{formatCurrency(currentSelectedArticle.price - currentSelectedArticle.cost)}
-                          </div>
-                        </div>
                       )}
                     </div>
-                  ) : (
-                    /* Lista / Buscador de Artículos ordenados A-Z */
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8E7E73]" />
-                        <input
-                          type="text"
-                          placeholder="Buscar artículo A-Z (ej: Bandeja, Cesto, Espejo, Hilo...)"
-                          value={articleSearchQuery}
-                          onChange={(e) => setArticleSearchQuery(e.target.value)}
-                          className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs text-[#2D231E] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
-                        />
-                        {articleSearchQuery && (
-                          <button
-                            type="button"
-                            onClick={() => setArticleSearchQuery('')}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8E7E73] hover:text-[#2D231E]"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
 
-                      <div className="max-h-48 sm:max-h-56 overflow-y-auto rounded-xl border border-[#DFCBB9] bg-white divide-y divide-[#F2ECE4] shadow-inner">
+                    {/* Desplegable de artículos coincidentes */}
+                    {isArticleSelectorOpen && (
+                      <div className="max-h-48 sm:max-h-56 overflow-y-auto rounded-xl border border-[#DFCBB9] bg-white divide-y divide-[#F2ECE4] shadow-md animate-in fade-in">
                         <div className="px-3 py-1.5 text-[10px] font-bold text-[#8E7E73] bg-[#FAF7F2] uppercase tracking-wider flex items-center justify-between sticky top-0 z-10">
                           <span>
                             {articleSearchQuery
                               ? `Coincidencias (${filteredArticles.length})`
-                              : `Artículos disponibles (${filteredArticles.length}) — Orden A-Z`}
+                              : `Catálogo de Artículos (${filteredArticles.length}) — Orden A-Z`}
                           </span>
-                          <span className="text-[9px] font-normal lowercase">click para elegir</span>
+                          <button
+                            type="button"
+                            onClick={() => setIsArticleSelectorOpen(false)}
+                            className="text-[10px] text-[#C86D51] font-semibold hover:underline lowercase"
+                          >
+                            cerrar lista ✕
+                          </button>
                         </div>
 
                         {filteredArticles.length > 0 ? (
@@ -794,7 +970,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
                             <button
                               key={a.id}
                               type="button"
-                              onClick={() => handleSelectArticle(a)}
+                              onClick={() => {
+                                handleAddCatalogArticle(a);
+                                setIsArticleSelectorOpen(false);
+                              }}
                               className="w-full text-left p-2.5 hover:bg-[#FAF3EA] transition-colors flex items-center justify-between group gap-2"
                             >
                               <div className="flex items-center gap-2.5 min-w-0">
@@ -818,11 +997,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
                               <div className="text-right shrink-0">
                                 <p className="font-bold text-xs text-[#2E6B4A]">
-                                  {formatCurrency(a.price)}
+                                  +{formatCurrency(a.price)}
                                 </p>
-                                <p className="text-[10px] text-[#8E7E73]">
-                                  Costo: {formatCurrency(a.cost)}
-                                </p>
+                                <span className="text-[10px] text-[#2E6B4A] font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                  + Sumar a venta
+                                </span>
                               </div>
                             </button>
                           ))
@@ -833,84 +1012,147 @@ export const SalesView: React.FC<SalesViewProps> = ({
                               type="button"
                               onClick={() => {
                                 setIsCustomProductMode(true);
-                                setFormData(prev => ({ ...prev, productName: articleSearchQuery }));
+                                setCustomItemName(articleSearchQuery);
+                                setIsArticleSelectorOpen(false);
                               }}
                               className="text-xs font-bold text-[#C86D51] hover:underline"
                             >
-                              + Usar "{articleSearchQuery}" como producto personalizado
+                              + Usar "{articleSearchQuery}" como pieza personalizada
                             </button>
                           </div>
                         )}
                       </div>
+                    )}
+                  </div>
+                )}
 
-                      {formData.productName && isArticleSelectorOpen && (
-                        <div className="flex justify-end pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setIsArticleSelectorOpen(false)}
-                            className="text-[11px] font-semibold text-[#7D6E63] hover:text-[#2D231E]"
-                          >
-                            Mantener "{formData.productName}"
-                          </button>
-                        </div>
-                      )}
+                {/* Lista de Artículos Cargados en la Venta */}
+                <div className="space-y-2 pt-1">
+                  {saleItems.length === 0 ? (
+                    <div className="p-4 bg-white rounded-xl border border-dashed border-[#DFCBB9] text-center text-xs text-[#8E7E73] space-y-1">
+                      <ShoppingBag className="w-7 h-7 text-[#DFCBB9] mx-auto" />
+                      <p className="font-semibold text-[#5C4F47]">Ningún artículo agregado todavía</p>
+                      <p className="text-[11px]">Buscá en el catálogo arriba o hacé clic en "+ Cargar Pieza Personalizada".</p>
                     </div>
-                  )
+                  ) : (
+                    <div className="space-y-2 max-h-56 sm:max-h-64 overflow-y-auto pr-0.5">
+                      {saleItems.map((item, idx) => (
+                        <div key={item.id || idx} className="p-3 bg-white rounded-xl border border-[#DFCBB9] shadow-2xs space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[10px] font-semibold text-[#93452E] bg-[#FAF3EA] px-2 py-0.5 rounded-full border border-[#DFCBB9]">
+                                  {item.category || 'Otros'}
+                                </span>
+                                {item.estimatedCost !== undefined && (
+                                  <span className="text-[10px] text-[#2E6B4A] bg-[#E8F5E9] px-1.5 py-0.2 rounded font-medium">
+                                    Costo u.: {formatCurrency(item.estimatedCost)}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="font-bold text-xs text-[#2D231E] mt-1 break-words">
+                                {item.productName}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              className="p-1.5 text-[#C62828]/60 hover:text-[#C62828] hover:bg-[#FFEBEE] rounded-lg transition-colors shrink-0"
+                              title="Quitar este artículo de la venta"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Controles de Cantidad, Precio Unitario y Subtotal */}
+                          <div className="pt-2 border-t border-[#F2ECE4] flex flex-wrap items-center justify-between gap-2 text-xs">
+                            {/* Stepper Cantidad */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-[#7D6E63] font-medium">Cant:</span>
+                              <div className="flex items-center border border-[#DFCBB9] rounded-lg bg-[#FAF7F2] overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItemQuantity(idx, item.quantity - 1)}
+                                  className="px-2 py-1 text-[#5C4F47] hover:bg-[#EFE7DE] transition-colors"
+                                  title="Restar 1"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <span className="px-2.5 py-0.5 text-xs font-bold text-[#2D231E] min-w-6 text-center">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItemQuantity(idx, item.quantity + 1)}
+                                  className="px-2 py-1 text-[#5C4F47] hover:bg-[#EFE7DE] transition-colors"
+                                  title="Sumar 1"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Precio Unitario Editable */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-[#7D6E63] font-medium">Precio u.:</span>
+                              <div className="relative w-24">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#8E7E73] font-bold">$</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={item.unitPrice}
+                                  onChange={(e) => handleUpdateItemUnitPrice(idx, parseFloat(e.target.value) || 0)}
+                                  className="w-full pl-5 pr-1.5 py-1 text-xs font-semibold rounded-md border border-[#DFCBB9] bg-white text-right focus:outline-none focus:ring-1 focus:ring-[#2E6B4A]"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Subtotal */}
+                            <div className="text-right">
+                              <span className="text-[10px] text-[#8E7E73] block">Subtotal</span>
+                              <span className="font-bold text-xs text-[#2E6B4A]">
+                                {formatCurrency(item.totalPrice)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Resumen de Totales de los Artículos */}
+                {saleItems.length > 0 && (
+                  <div className="p-3 bg-white rounded-xl border border-[#DFCBB9] grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                    <div>
+                      <p className="text-[10px] font-semibold text-[#8E7E73] uppercase">Artículos</p>
+                      <p className="font-bold text-[#2D231E] mt-0.5">{saleItems.length} ({modalTotalQuantity} u.)</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-[#7D6E63] uppercase">Costo Insumos</p>
+                      <p className="font-bold text-[#7D6E63] mt-0.5">{formatCurrency(modalTotalCost)}</p>
+                    </div>
+                    <div className="sm:border-l border-[#F2ECE4]">
+                      <p className="text-[10px] font-semibold text-[#2E6B4A] uppercase">Total Venta</p>
+                      <p className="font-bold text-sm text-[#2E6B4A] mt-0.5">{formatCurrency(modalTotalAmount)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-[#2E7D32] uppercase">Margen Neto</p>
+                      <p className="font-bold text-[#2E7D32] mt-0.5">+{formatCurrency(modalTotalAmount - modalTotalCost)}</p>
+                    </div>
+                  </div>
+                )}
+
+                {itemsError && (
+                  <div className="p-2 rounded-lg bg-[#FFEBEE] text-[#C62828] text-xs font-bold animate-in fade-in">
+                    {itemsError}
+                  </div>
                 )}
               </div>
 
-              {/* Categoría y Cantidad */}
+              {/* Medio de Cobro y Fecha de Venta */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[#5C4F47] mb-1">
-                    Categoría *
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value as ProductCategory })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs font-medium"
-                  >
-                    {PRODUCT_CATEGORIES.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-[#5C4F47] mb-1">
-                    Cantidad *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={formData.quantity}
-                    onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-sm font-semibold"
-                  />
-                </div>
-              </div>
-
-              {/* Precio Unitario y Medio de Cobro */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[#5C4F47] mb-1">
-                    Precio Unitario ($) *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-[#8E7E73]">$</span>
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      placeholder="38000"
-                      value={formData.unitPrice}
-                      onChange={(e) => setFormData({ ...formData, unitPrice: e.target.value })}
-                      className="w-full pl-8 pr-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-sm font-bold text-[#2D231E]"
-                    />
-                  </div>
-                </div>
-
                 <div>
                   <label className="block font-bold text-[#5C4F47] mb-1">
                     Medio de Cobro *
@@ -925,20 +1167,19 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     ))}
                   </select>
                 </div>
-              </div>
 
-              {/* Fecha de Venta */}
-              <div>
-                <label className="block font-bold text-[#5C4F47] mb-1">
-                  Fecha de Venta *
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs"
-                />
+                <div>
+                  <label className="block font-bold text-[#5C4F47] mb-1">
+                    Fecha de Venta *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFCBB9] bg-[#FAF7F2] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A] text-xs"
+                  />
+                </div>
               </div>
 
               {/* Opcional: Venta por Encargo con Seña */}

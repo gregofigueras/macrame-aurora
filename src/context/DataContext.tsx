@@ -51,6 +51,7 @@ interface DataContextType {
     depositAmount: number;
     depositPaymentMethod?: PaymentMethod;
     notes?: string;
+    totalPrice?: number;
   }) => { success: boolean; message: string; reservation?: Reservation };
   
   updateReservation: (workshopId: string, reservationId: string, data: Partial<Reservation>) => void;
@@ -593,7 +594,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (articles.length > 0) promises.push(Promise.resolve(supabase.from('articles').upsert(articles)));
       if (clients.length > 0) promises.push(Promise.resolve(supabase.from('clients').upsert(clients)));
       if (expenses.length > 0) promises.push(Promise.resolve(supabase.from('expenses').upsert(expenses)));
-      if (sales.length > 0) promises.push(Promise.resolve(supabase.from('sales').upsert(sales)));
+      if (sales.length > 0) {
+        const salesUpsertPromise = (async () => {
+          const res = await supabase.from('sales').upsert(sales);
+          if (res.error && (res.error.message?.includes('items') || res.error.code === 'PGRST204')) {
+            const sanitizedSales = sales.map(({ items, ...rest }) => rest);
+            return await supabase.from('sales').upsert(sanitizedSales);
+          }
+          return res;
+        })();
+        promises.push(salesUpsertPromise);
+      }
       if (workshops.length > 0) promises.push(Promise.resolve(supabase.from('workshops').upsert(workshops)));
 
       const results = await Promise.all(promises);
@@ -892,13 +903,38 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       findOrCreateClient(saleData.customerName, saleData.customerPhone || '');
     }
     setSales(prev => [newSale, ...prev]);
-    safeDbOp(supabase.from('sales').insert(newSale));
+
+    // Resilient insert: Try with items; if schema lacks items column, retry without it
+    Promise.resolve(supabase.from('sales').insert(newSale)).then(res => {
+      if (res?.error && (res.error.message?.includes('items') || res.error.code === 'PGRST204')) {
+        const { items, ...saleWithoutItems } = newSale;
+        supabase.from('sales').insert(saleWithoutItems).then(retryRes => {
+          if (retryRes?.error) console.warn('Supabase retry insert error:', retryRes.error);
+        });
+      } else if (res?.error) {
+        console.warn('Supabase DB error:', res.error);
+      }
+    }).catch(err => console.warn('Supabase network error:', err));
+
     return newSale;
   };
 
   const updateSale = (id: string, data: Partial<Sale>) => {
     setSales(prev => prev.map(s => (s.id === id ? { ...s, ...data } : s)));
-    safeDbOp(supabase.from('sales').update(data).eq('id', id));
+
+    // Resilient update: Try with items; if schema lacks items column, retry without it
+    Promise.resolve(supabase.from('sales').update(data).eq('id', id)).then(res => {
+      if (res?.error && (res.error.message?.includes('items') || res.error.code === 'PGRST204')) {
+        const { items, ...dataWithoutItems } = data;
+        if (Object.keys(dataWithoutItems).length > 0) {
+          supabase.from('sales').update(dataWithoutItems).eq('id', id).then(retryRes => {
+            if (retryRes?.error) console.warn('Supabase retry update error:', retryRes.error);
+          });
+        }
+      } else if (res?.error) {
+        console.warn('Supabase DB error:', res.error);
+      }
+    }).catch(err => console.warn('Supabase network error:', err));
   };
 
   const deleteSale = (id: string) => {
@@ -944,6 +980,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       depositAmount: number;
       depositPaymentMethod?: PaymentMethod;
       notes?: string;
+      totalPrice?: number;
     }
   ) => {
     const workshop = workshops.find(w => w.id === workshopId);
@@ -961,9 +998,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Register or find person
     const client = findOrCreateClient(data.clientName, data.clientPhone, data.clientEmail);
 
+    const agreedPrice = (data.totalPrice !== undefined && !isNaN(data.totalPrice) && data.totalPrice >= 0)
+      ? data.totalPrice
+      : workshop.pricePerPerson;
+
     const depositAmount = data.depositStatus === 'Pagada' ? data.depositAmount : 0;
-    const remainingBalance = Math.max(0, workshop.pricePerPerson - depositAmount);
-    const isFullyPaid = depositAmount >= workshop.pricePerPerson;
+    const remainingBalance = Math.max(0, agreedPrice - depositAmount);
+    const isFullyPaid = depositAmount >= agreedPrice;
 
     const newReservation: Reservation = {
       id: 'res-' + Date.now(),
@@ -974,7 +1015,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clientEmail: client.email,
       depositStatus: data.depositStatus,
       depositAmount,
-      totalPrice: workshop.pricePerPerson,
+      totalPrice: agreedPrice,
       remainingBalance,
       isFullyPaid,
       depositPaymentMethod: data.depositPaymentMethod,

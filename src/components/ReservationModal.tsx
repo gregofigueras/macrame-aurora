@@ -17,7 +17,8 @@ import {
   Trash2, 
   Download, 
   Check, 
-  Phone
+  Phone,
+  Edit3
 } from 'lucide-react';
 
 interface ReservationModalProps {
@@ -42,6 +43,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   const [depositAmount, setDepositAmount] = useState<string>('');
   const [depositPaymentMethod, setDepositPaymentMethod] = useState<PaymentMethod>('Transferencia');
   const [notes, setNotes] = useState('');
+
+  // Individual price for registering student (defaults to workshop.pricePerPerson)
+  const [customPrice, setCustomPrice] = useState<string>('');
+
+  React.useEffect(() => {
+    if (workshop) {
+      setCustomPrice(workshop.pricePerPerson.toString());
+    }
+  }, [workshop?.id, workshop?.pricePerPerson]);
 
   // Matching clients based on what's typed in clientName
   const cleanTypedName = clientName.toLowerCase().trim();
@@ -71,16 +81,18 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     if (c.email) setClientEmail(c.email);
   };
 
-
   // Quick edit deposit modal/state for an attendee
   const [editingDepositResId, setEditingDepositResId] = useState<string | null>(null);
   const [quickDepositAmount, setQuickDepositAmount] = useState<string>('');
   const [quickPaymentMethod, setQuickPaymentMethod] = useState<PaymentMethod>('Transferencia');
 
+  // Quick edit individual price state for an existing attendee
+  const [editingPriceResId, setEditingPriceResId] = useState<string | null>(null);
+  const [editPriceInput, setEditPriceInput] = useState<string>('');
+
   // Error/Success messages
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
 
   if (!isOpen || !workshop) return null;
 
@@ -97,11 +109,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     return acc + (r.depositStatus === 'Pagada' ? r.depositAmount : 0) + (r.isFullyPaid ? r.remainingBalance : 0);
   }, 0);
 
-  const totalExpected = workshop.reservations.length * workshop.pricePerPerson;
+  const totalExpected = workshop.reservations.reduce((acc, r) => {
+    return acc + (r.totalPrice !== undefined ? r.totalPrice : workshop.pricePerPerson);
+  }, 0);
   const totalPendingBalance = Math.max(0, totalExpected - totalCollected);
 
   const handleAddReservationSubmit = (e: React.FormEvent) => {
-
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -120,6 +133,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
       ? (depositAmount ? parseFloat(depositAmount) : effectiveSuggestedDeposit)
       : 0;
 
+    const finalPrice = customPrice ? parseFloat(customPrice) : workshop.pricePerPerson;
+
     const result = addReservation(workshop.id, {
       clientName: clientName.trim(),
       clientPhone: clientPhone.trim(),
@@ -128,6 +143,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
       depositAmount: amountNum,
       depositPaymentMethod: depositStatus === 'Pagada' ? depositPaymentMethod : undefined,
       notes: notes.trim() || undefined,
+      totalPrice: isNaN(finalPrice) ? workshop.pricePerPerson : finalPrice,
     });
 
     if (result.success) {
@@ -137,6 +153,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
       setClientPhone('');
       setClientEmail('');
       setDepositAmount('');
+      setCustomPrice(workshop.pricePerPerson.toString());
       setNotes('');
       setTimeout(() => setSuccessMessage(null), 3000);
     } else {
@@ -157,11 +174,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   };
 
   const handleMarkFullyPaid = (res: Reservation) => {
+    const studentPrice = res.totalPrice ?? workshop.pricePerPerson;
     updateReservation(workshop.id, res.id, {
       isFullyPaid: true,
       remainingBalance: 0,
       depositStatus: 'Pagada',
-      depositAmount: res.totalPrice,
+      depositAmount: studentPrice,
     });
   };
 
@@ -361,6 +379,39 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     onChange={(e) => setClientEmail(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
                   />
+                </div>
+
+                {/* Arancel Individual para este alumno */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-[#5C4F47]">
+                      Arancel para este Alumno ($) *
+                    </label>
+                    {customPrice !== workshop.pricePerPerson.toString() && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomPrice(workshop.pricePerPerson.toString())}
+                        className="text-[10px] text-[#C86D51] hover:underline font-semibold"
+                      >
+                        Restablecer a base (${workshop.pricePerPerson})
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-[#8E7E73]">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      placeholder={workshop.pricePerPerson.toString()}
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice(e.target.value)}
+                      className="w-full pl-7 pr-3 py-2 rounded-xl border border-[#DFCBB9] bg-white text-xs font-bold text-[#2E6B4A] focus:outline-none focus:ring-2 focus:ring-[#C86D51]"
+                    />
+                  </div>
+                  <p className="text-[10px] text-[#8E7E73] mt-0.5">
+                    Precio base: {formatCurrency(workshop.pricePerPerson)}. Modificalo si tiene descuento o precio especial.
+                  </p>
                 </div>
 
                 {/* SEÑA: Control Central */}
@@ -597,24 +648,107 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                       </div>
 
                       {/* Financial info for this reservation */}
-                      <div className="flex flex-wrap items-center justify-between text-xs p-2.5 bg-[#FAF7F2] rounded-xl border border-[#F2ECE4] gap-2">
-                        <div>
-                          <span className="text-[#7D6E63]">Seña Pagada: </span>
-                          <span className={`font-bold ${res.depositAmount > 0 ? 'text-[#2E7D32]' : 'text-[#C62828]'}`}>
-                            {formatCurrency(res.depositAmount)}
-                          </span>
-                          {res.depositPaymentMethod && (
-                            <span className="text-[10px] text-[#8E7E73] ml-1">({res.depositPaymentMethod})</span>
-                          )}
+                      <div className="space-y-1.5 p-2.5 bg-[#FAF7F2] rounded-xl border border-[#F2ECE4]">
+                        <div className="flex items-center justify-between text-xs pb-1.5 border-b border-[#F2ECE4]">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[#7D6E63]">Arancel acordado:</span>
+                            <span className="font-bold text-[#2D231E]">
+                              {formatCurrency(res.totalPrice ?? workshop.pricePerPerson)}
+                            </span>
+                            {res.totalPrice !== undefined && res.totalPrice !== workshop.pricePerPerson && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#FAF0E6] text-[#C86D51] font-bold">
+                                Especial
+                              </span>
+                            )}
+                          </div>
+                          
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (editingPriceResId === res.id) {
+                                setEditingPriceResId(null);
+                              } else {
+                                setEditingPriceResId(res.id);
+                                setEditPriceInput((res.totalPrice ?? workshop.pricePerPerson).toString());
+                              }
+                            }}
+                            className="text-[11px] text-[#C86D51] hover:underline flex items-center gap-1 font-semibold"
+                            title="Editar arancel acordado de este alumno"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>{editingPriceResId === res.id ? 'Cerrar' : 'Modificar arancel'}</span>
+                          </button>
                         </div>
 
-                        <div>
-                          <span className="text-[#7D6E63]">Resta Abonar: </span>
-                          <span className={`font-bold ${res.remainingBalance > 0 ? 'text-[#E65100]' : 'text-[#2E7D32]'}`}>
-                            {formatCurrency(res.remainingBalance)}
-                          </span>
+                        <div className="flex flex-wrap items-center justify-between text-xs gap-2 pt-0.5">
+                          <div>
+                            <span className="text-[#7D6E63]">Seña Pagada: </span>
+                            <span className={`font-bold ${res.depositAmount > 0 ? 'text-[#2E7D32]' : 'text-[#C62828]'}`}>
+                              {formatCurrency(res.depositAmount)}
+                            </span>
+                            {res.depositPaymentMethod && (
+                              <span className="text-[10px] text-[#8E7E73] ml-1">({res.depositPaymentMethod})</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-[#7D6E63]">Resta Abonar: </span>
+                            <span className={`font-bold ${res.remainingBalance > 0 ? 'text-[#E65100]' : 'text-[#2E7D32]'}`}>
+                              {formatCurrency(res.remainingBalance)}
+                            </span>
+                          </div>
                         </div>
                       </div>
+
+                      {/* Quick edit individual price inline box */}
+                      {editingPriceResId === res.id && (
+                        <div className="p-3 bg-[#FFF9F5] border border-[#DFCBB9] rounded-xl space-y-2 animate-in fade-in">
+                          <div className="flex items-center justify-between text-xs">
+                            <p className="font-bold text-[#C86D51]">
+                              Cambiar arancel de {res.clientName}:
+                            </p>
+                            <span className="text-[10px] text-[#8E7E73]">
+                              Base taller: {formatCurrency(workshop.pricePerPerson)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="relative flex-1">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-[#8E7E73]">$</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={editPriceInput}
+                                onChange={(e) => setEditPriceInput(e.target.value)}
+                                className="w-full pl-7 pr-2.5 py-1.5 rounded-lg border border-[#DFCBB9] bg-white text-xs font-bold text-[#2E6B4A]"
+                                placeholder={workshop.pricePerPerson.toString()}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newP = parseFloat(editPriceInput);
+                                if (!isNaN(newP) && newP >= 0) {
+                                  updateReservation(workshop.id, res.id, { totalPrice: newP });
+                                }
+                                setEditingPriceResId(null);
+                              }}
+                              className="px-3 py-1.5 bg-[#2E6B4A] hover:bg-[#25563B] text-white text-xs font-bold rounded-lg transition-colors"
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPriceResId(null)}
+                              className="px-2.5 py-1.5 text-xs text-[#7D6E63] hover:text-[#2D231E]"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-[#8E7E73]">
+                            Al cambiar el arancel, el saldo restante y el estado de pago se recalculan automáticamente.
+                          </p>
+                        </div>
+                      )}
 
                       {/* Quick pay deposit inline box if opened */}
                       {isEditingDeposit && (

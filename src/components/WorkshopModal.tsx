@@ -188,7 +188,7 @@ export const WorkshopModal: React.FC<WorkshopModalProps> = ({
 
             <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#DFCBB9]">
               <label className="block font-bold text-[#5C4F47] mb-1">
-                Precio Total Alumno ($) *
+                Precio Base Alumno ($) *
               </label>
               <input
                 type="number"
@@ -198,7 +198,7 @@ export const WorkshopModal: React.FC<WorkshopModalProps> = ({
                 onChange={(e) => setFormData({ ...formData, pricePerPerson: parseFloat(e.target.value) || 0 })}
                 className="w-full px-3 py-1.5 rounded-lg border border-[#DFCBB9] bg-white text-sm font-bold text-[#2E6B4A] focus:outline-none focus:ring-2 focus:ring-[#2E6B4A]"
               />
-              <p className="text-[10px] text-[#8E7E73] mt-1">Arancel total</p>
+              <p className="text-[10px] text-[#8E7E73] mt-1">Arancel base por persona</p>
             </div>
 
             <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#DFCBB9]">

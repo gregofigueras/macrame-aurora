@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS public.expenses (
 CREATE TABLE IF NOT EXISTS public.sales (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
+  items JSONB DEFAULT '[]'::jsonb,
   "articleId" TEXT,
   "productName" TEXT NOT NULL,
   category TEXT NOT NULL,
@@ -73,6 +74,10 @@ CREATE TABLE IF NOT EXISTS public.sales (
   "isFullyPaid" BOOLEAN DEFAULT true,
   "deliveryDate" TEXT
 );
+
+-- Si la tabla sales ya existía previamente, asegurar columna items
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb;
+
 
 -- 5. Tabla de Talleres y Reservas
 CREATE TABLE IF NOT EXISTS public.workshops (

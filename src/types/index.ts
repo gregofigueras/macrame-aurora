@@ -48,9 +48,21 @@ export interface Article {
   createdAt: string;
 }
 
+export interface SaleItem {
+  id?: string;
+  articleId?: string;
+  productName: string;
+  category?: ProductCategory;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  estimatedCost?: number;
+}
+
 export interface Sale {
   id: string;
   date: string; // YYYY-MM-DD
+  items?: SaleItem[]; // Lista de artículos incluidos en la venta
   articleId?: string; // ID del artículo seleccionado si proviene del catálogo
   productName: string; // Nombre del artículo o pieza
   category: ProductCategory;

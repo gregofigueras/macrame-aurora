@@ -322,7 +322,7 @@ export const WorkshopsView: React.FC<WorkshopsViewProps> = ({
           {/* Price & Location details */}
           <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#F2ECE4] space-y-1 text-xs">
             <div className="flex items-center justify-between">
-              <span className="text-[#7D6E63]">Arancel por persona:</span>
+              <span className="text-[#7D6E63]">Arancel base por persona:</span>
               <span className="font-bold text-[#2E6B4A]">{formatCurrency(ws.pricePerPerson)}</span>
             </div>
             <div className="flex items-center justify-between">
