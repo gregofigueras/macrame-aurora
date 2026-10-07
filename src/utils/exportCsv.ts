@@ -77,7 +77,7 @@ export const exportSalesToCSV = (sales: Sale[]) => {
       s.paymentMethod,
       s.customerName || '',
       s.customerPhone || '',
-      s.notes || ''
+      (s.notes || '').replace(/<!--AURORA_ITEMS:[\s\S]*?-->/g, '').trim()
     ];
   });
   downloadCSV(`Macrame_Aurora_Ventas_${new Date().toISOString().slice(0, 10)}.csv`, [headers, ...rows]);

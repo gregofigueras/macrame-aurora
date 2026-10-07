@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import type { Expense, Sale, Workshop, Client, Reservation, DepositStatus, PaymentMethod, Article } from '../types';
+import type { Expense, Sale, Workshop, Client, Reservation, DepositStatus, PaymentMethod, Article, SaleItem, ProductCategory } from '../types';
 import { supabase } from '../lib/supabase';
 
 const STORAGE_KEY = 'macrame_aurora_data_v1';
@@ -495,6 +495,133 @@ const initialWorkshops: Workshop[] = [
   }
 ];
 
+export const ITEMS_TAG_REGEX = /<!--AURORA_ITEMS:([\s\S]*?)-->/;
+
+export const reconstructItemsFromProductName = (
+  productName: string,
+  availableArticles: Article[] = [],
+  totalAmount?: number,
+  fallbackCategory?: ProductCategory
+): SaleItem[] => {
+  if (!productName || typeof productName !== 'string') return [];
+  
+  const parts = productName.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return [];
+
+  const items: SaleItem[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const matchQty = part.match(/^(?:(\d+)\s*(?:x|u\.?)\s*)?(.+)$/i);
+    const qty = matchQty && matchQty[1] ? parseInt(matchQty[1], 10) : 1;
+    const name = matchQty && matchQty[2] ? matchQty[2].trim() : part.trim();
+
+    const cleanName = name.toLowerCase();
+    const matchedArticle = availableArticles.find(a => 
+      a.name.toLowerCase().trim() === cleanName ||
+      cleanName.includes(a.name.toLowerCase().trim()) ||
+      a.name.toLowerCase().trim().includes(cleanName)
+    );
+
+    if (matchedArticle) {
+      items.push({
+        id: `item-${i + 1}-${Date.now()}`,
+        articleId: matchedArticle.id,
+        productName: matchedArticle.name,
+        category: matchedArticle.category,
+        quantity: qty,
+        unitPrice: matchedArticle.price,
+        totalPrice: matchedArticle.price * qty,
+        estimatedCost: matchedArticle.cost,
+      });
+    } else {
+      items.push({
+        id: `custom-${i + 1}-${Date.now()}`,
+        productName: name,
+        category: fallbackCategory || 'Otros',
+        quantity: qty,
+        unitPrice: 0,
+        totalPrice: 0,
+      });
+    }
+  }
+
+  const knownTotal = items.reduce((sum, it) => sum + it.totalPrice, 0);
+  const unpricedCount = items.filter(it => it.totalPrice === 0).length;
+  if (totalAmount && unpricedCount > 0 && totalAmount > knownTotal) {
+    const remainder = Math.round((totalAmount - knownTotal) / unpricedCount);
+    items.forEach(it => {
+      if (it.totalPrice === 0) {
+        it.unitPrice = Math.round(remainder / (it.quantity || 1));
+        it.totalPrice = remainder;
+      }
+    });
+  }
+
+  return items;
+};
+
+export const serializeSaleForCloud = (sale: Sale): Omit<Sale, 'items'> & { notes?: string } => {
+  const { items, ...rest } = sale;
+  let notes = rest.notes || '';
+  
+  notes = notes.replace(ITEMS_TAG_REGEX, '').trim();
+
+  if (items && Array.isArray(items) && items.length > 0) {
+    const itemsJson = JSON.stringify(items);
+    notes = notes ? `${notes}\n<!--AURORA_ITEMS:${itemsJson}-->` : `<!--AURORA_ITEMS:${itemsJson}-->`;
+  }
+
+  return {
+    ...rest,
+    notes: notes || undefined,
+  };
+};
+
+export const deserializeSaleFromCloud = (rawSale: any, availableArticles?: Article[]): Sale => {
+  if (!rawSale) return rawSale;
+  let cleanNotes = rawSale.notes || '';
+  let items: SaleItem[] | undefined = undefined;
+
+  if (typeof cleanNotes === 'string') {
+    const match = cleanNotes.match(ITEMS_TAG_REGEX);
+    if (match && match[1]) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          items = parsed;
+        }
+      } catch (err) {
+        console.warn('Error parsing items from cloud note tag:', err);
+      }
+      cleanNotes = cleanNotes.replace(ITEMS_TAG_REGEX, '').trim();
+    }
+  }
+
+  if (!items && Array.isArray(rawSale.items) && rawSale.items.length > 0) {
+    items = rawSale.items;
+  }
+
+  if (!items && typeof rawSale.productName === 'string' && rawSale.productName.includes(',')) {
+    const reconstructed = reconstructItemsFromProductName(rawSale.productName, availableArticles, rawSale.totalAmount, rawSale.category);
+    if (reconstructed.length > 0) {
+      items = reconstructed;
+    }
+  }
+
+  return {
+    ...rawSale,
+    items,
+    notes: cleanNotes || undefined,
+    customerName: rawSale.customerName || undefined,
+    customerPhone: rawSale.customerPhone || undefined,
+    depositAmount: (rawSale.depositAmount !== null && rawSale.depositAmount !== undefined) ? Number(rawSale.depositAmount) : undefined,
+    isFullyPaid: (rawSale.isFullyPaid !== null && rawSale.isFullyPaid !== undefined) ? Boolean(rawSale.isFullyPaid) : undefined,
+    isCustomOrder: (rawSale.isCustomOrder !== null && rawSale.isCustomOrder !== undefined) ? Boolean(rawSale.isCustomOrder) : false,
+    deliveryDate: rawSale.deliveryDate || undefined,
+  };
+};
+
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -505,7 +632,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [sales, setSales] = useState<Sale[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY + '_sales');
-    return saved ? JSON.parse(saved) : initialSales;
+    if (!saved) return initialSales;
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        return parsed.map(s => deserializeSaleFromCloud(s, excelArticles));
+      }
+    } catch {
+      // fallback to initialSales
+    }
+    return initialSales;
   });
 
   const [workshops, setWorkshops] = useState<Workshop[]>(() => {
@@ -595,15 +731,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (clients.length > 0) promises.push(Promise.resolve(supabase.from('clients').upsert(clients)));
       if (expenses.length > 0) promises.push(Promise.resolve(supabase.from('expenses').upsert(expenses)));
       if (sales.length > 0) {
-        const salesUpsertPromise = (async () => {
-          const res = await supabase.from('sales').upsert(sales);
-          if (res.error && (res.error.message?.includes('items') || res.error.code === 'PGRST204')) {
-            const sanitizedSales = sales.map(({ items, ...rest }) => rest);
-            return await supabase.from('sales').upsert(sanitizedSales);
-          }
-          return res;
-        })();
-        promises.push(salesUpsertPromise);
+        const sanitizedSales = sales.map(serializeSaleForCloud);
+        promises.push(Promise.resolve(supabase.from('sales').upsert(sanitizedSales)));
       }
       if (workshops.length > 0) promises.push(Promise.resolve(supabase.from('workshops').upsert(workshops)));
 
@@ -646,10 +775,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, message: `Error al descargar datos de Supabase: ${msg}` };
       }
 
-      if (resArticles.data && resArticles.data.length > 0) setArticles(resArticles.data as Article[]);
+      const currentArticles = (resArticles.data as Article[]) || articles;
+      if (resArticles.data && resArticles.data.length > 0) setArticles(currentArticles);
       if (resClients.data && resClients.data.length > 0) setClients(resClients.data as Client[]);
       if (resExpenses.data && resExpenses.data.length > 0) setExpenses(resExpenses.data as Expense[]);
-      if (resSales.data && resSales.data.length > 0) setSales(resSales.data as Sale[]);
+      if (resSales.data && resSales.data.length > 0) {
+        const loadedSales = (resSales.data as any[]).map(r => deserializeSaleFromCloud(r, currentArticles));
+        setSales(loadedSales);
+      }
       if (resWorkshops.data && resWorkshops.data.length > 0) setWorkshops(resWorkshops.data as Workshop[]);
 
       setCloudSyncStatus('synced');
@@ -659,7 +792,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCloudSyncStatus('error');
       return { success: false, message: err?.message || 'Error al descargar datos' };
     }
-  }, []);
+  }, [articles]);
 
   // Initial cloud fetch on mount
   useEffect(() => {
@@ -698,7 +831,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const cArticles = (resArticles.data as Article[]) || [];
         const cClients = (resClients.data as Client[]) || [];
         const cExpenses = (resExpenses.data as Expense[]) || [];
-        const cSales = (resSales.data as Sale[]) || [];
+        const cSales = ((resSales.data as any[]) || []).map(r => deserializeSaleFromCloud(r, cArticles));
         const cWorkshops = (resWorkshops.data as Workshop[]) || [];
 
         const totalCloudCount = cArticles.length + cClients.length + cExpenses.length + cSales.length + cWorkshops.length;
@@ -707,7 +840,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setArticles(cArticles);
           setClients(cClients);
           setExpenses(cExpenses);
-          setSales(cSales);
+          setSales(prev => {
+            return cSales.map(cs => {
+              const localMatch = prev.find(p => p.id === cs.id);
+              if (localMatch?.items && (!cs.items || cs.items.length === 0)) {
+                return { ...cs, items: localMatch.items };
+              }
+              return cs;
+            });
+          });
           setWorkshops(cWorkshops);
           setCloudSyncStatus('synced');
           setLastSyncTime(new Date().toLocaleTimeString());
@@ -718,7 +859,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (articles.length > 0) promises.push(Promise.resolve(supabase.from('articles').upsert(articles)));
           if (clients.length > 0) promises.push(Promise.resolve(supabase.from('clients').upsert(clients)));
           if (expenses.length > 0) promises.push(Promise.resolve(supabase.from('expenses').upsert(expenses)));
-          if (sales.length > 0) promises.push(Promise.resolve(supabase.from('sales').upsert(sales)));
+          if (sales.length > 0) {
+            const sanitizedSales = sales.map(serializeSaleForCloud);
+            promises.push(Promise.resolve(supabase.from('sales').upsert(sanitizedSales)));
+          }
           if (workshops.length > 0) promises.push(Promise.resolve(supabase.from('workshops').upsert(workshops)));
           if (promises.length > 0) {
             await Promise.all(promises);
@@ -746,11 +890,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .channel('aurora_realtime_sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, (payload) => {
         if (payload.eventType === 'INSERT') {
-          const newRow = payload.new as Sale;
+          const newRow = deserializeSaleFromCloud(payload.new, articles);
           setSales(prev => (prev.some(s => s.id === newRow.id) ? prev : [newRow, ...prev]));
         } else if (payload.eventType === 'UPDATE') {
-          const updatedRow = payload.new as Sale;
-          setSales(prev => prev.map(s => (s.id === updatedRow.id ? updatedRow : s)));
+          const updatedRow = deserializeSaleFromCloud(payload.new, articles);
+          setSales(prev => prev.map(s => {
+            if (s.id !== updatedRow.id) return s;
+            const items = (updatedRow.items && updatedRow.items.length > 0) ? updatedRow.items : s.items;
+            return { ...updatedRow, items };
+          }));
         } else if (payload.eventType === 'DELETE') {
           const oldRow = payload.old as { id: string };
           setSales(prev => prev.filter(s => s.id !== oldRow.id));
@@ -904,37 +1052,30 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setSales(prev => [newSale, ...prev]);
 
-    // Resilient insert: Try with items; if schema lacks items column, retry without it
-    Promise.resolve(supabase.from('sales').insert(newSale)).then(res => {
-      if (res?.error && (res.error.message?.includes('items') || res.error.code === 'PGRST204')) {
-        const { items, ...saleWithoutItems } = newSale;
-        supabase.from('sales').insert(saleWithoutItems).then(retryRes => {
-          if (retryRes?.error) console.warn('Supabase retry insert error:', retryRes.error);
-        });
-      } else if (res?.error) {
-        console.warn('Supabase DB error:', res.error);
-      }
-    }).catch(err => console.warn('Supabase network error:', err));
+    const cloudPayload = serializeSaleForCloud(newSale);
+    safeDbOp(supabase.from('sales').insert(cloudPayload));
 
     return newSale;
   };
 
   const updateSale = (id: string, data: Partial<Sale>) => {
-    setSales(prev => prev.map(s => (s.id === id ? { ...s, ...data } : s)));
+    let mergedSale: Sale | undefined;
 
-    // Resilient update: Try with items; if schema lacks items column, retry without it
-    Promise.resolve(supabase.from('sales').update(data).eq('id', id)).then(res => {
-      if (res?.error && (res.error.message?.includes('items') || res.error.code === 'PGRST204')) {
-        const { items, ...dataWithoutItems } = data;
-        if (Object.keys(dataWithoutItems).length > 0) {
-          supabase.from('sales').update(dataWithoutItems).eq('id', id).then(retryRes => {
-            if (retryRes?.error) console.warn('Supabase retry update error:', retryRes.error);
-          });
-        }
-      } else if (res?.error) {
-        console.warn('Supabase DB error:', res.error);
-      }
-    }).catch(err => console.warn('Supabase network error:', err));
+    setSales(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      mergedSale = { ...s, ...data };
+      return mergedSale;
+    }));
+
+    if (!mergedSale) {
+      const current = sales.find(s => s.id === id);
+      mergedSale = current ? { ...current, ...data } : (data as Sale);
+    }
+
+    if (mergedSale) {
+      const cloudPayload = serializeSaleForCloud(mergedSale);
+      safeDbOp(supabase.from('sales').update(cloudPayload).eq('id', id));
+    }
   };
 
   const deleteSale = (id: string) => {
@@ -1103,7 +1244,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const parsed = JSON.parse(jsonData);
       if (parsed.expenses && Array.isArray(parsed.expenses)) setExpenses(parsed.expenses);
-      if (parsed.sales && Array.isArray(parsed.sales)) setSales(parsed.sales);
+      if (parsed.sales && Array.isArray(parsed.sales)) {
+        const deserializedSales = parsed.sales.map((s: any) => deserializeSaleFromCloud(s, excelArticles));
+        setSales(deserializedSales);
+      }
       if (parsed.workshops && Array.isArray(parsed.workshops)) setWorkshops(parsed.workshops);
       if (parsed.clients && Array.isArray(parsed.clients)) setClients(parsed.clients);
       if (parsed.articles && Array.isArray(parsed.articles)) setArticles(parsed.articles);
@@ -1113,7 +1257,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (parsed.articles?.length) promises.push(Promise.resolve(supabase.from('articles').upsert(parsed.articles)));
       if (parsed.clients?.length) promises.push(Promise.resolve(supabase.from('clients').upsert(parsed.clients)));
       if (parsed.expenses?.length) promises.push(Promise.resolve(supabase.from('expenses').upsert(parsed.expenses)));
-      if (parsed.sales?.length) promises.push(Promise.resolve(supabase.from('sales').upsert(parsed.sales)));
+      if (parsed.sales?.length) {
+        const sanitized = parsed.sales.map((s: any) => serializeSaleForCloud(deserializeSaleFromCloud(s, excelArticles)));
+        promises.push(Promise.resolve(supabase.from('sales').upsert(sanitized)));
+      }
       if (parsed.workshops?.length) promises.push(Promise.resolve(supabase.from('workshops').upsert(parsed.workshops)));
       if (promises.length > 0) {
         Promise.all(promises)

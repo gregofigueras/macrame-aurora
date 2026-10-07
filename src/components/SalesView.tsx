@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useData } from '../context/DataContext';
+import { useData, ITEMS_TAG_REGEX, reconstructItemsFromProductName } from '../context/DataContext';
 import type { Sale, ProductCategory, PaymentMethod, Client, Article, SaleItem } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { exportSalesToCSV } from '../utils/exportCsv';
@@ -137,46 +137,89 @@ export const SalesView: React.FC<SalesViewProps> = ({
   };
 
   const handleOpenEdit = (sale: Sale) => {
-    setEditingSale(sale);
-    setItemsError(null);
-    if (sale.items && sale.items.length > 0) {
-      setSaleItems(sale.items.map(it => ({ ...it })));
-    } else {
-      // Legacy single-item fallback
-      setSaleItems([{
-        id: 'legacy-' + sale.id,
-        articleId: sale.articleId,
-        productName: sale.productName,
-        category: sale.category,
-        quantity: sale.quantity || 1,
-        unitPrice: sale.unitPrice || sale.totalAmount,
-        totalPrice: sale.totalAmount,
-        estimatedCost: sale.estimatedCost ? Math.round(sale.estimatedCost / (sale.quantity || 1)) : undefined,
-      }]);
+    try {
+      setEditingSale(sale);
+      setItemsError(null);
+
+      let resolvedItems: SaleItem[] = [];
+      if (Array.isArray(sale.items) && sale.items.length > 0) {
+        resolvedItems = sale.items.map(it => ({ ...it }));
+      } else {
+        // Try reconstruct from notes if notes contains tag
+        if (sale.notes && sale.notes.includes('<!--AURORA_ITEMS:')) {
+          const match = sale.notes.match(ITEMS_TAG_REGEX);
+          if (match && match[1]) {
+            try {
+              const parsed = JSON.parse(match[1]);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                resolvedItems = parsed;
+              }
+            } catch (e) {
+              console.warn('Error parsing items from note tag in handleOpenEdit:', e);
+            }
+          }
+        }
+
+        // Try reconstruct from productName if comma separated
+        if (resolvedItems.length === 0 && sale.productName && sale.productName.includes(',')) {
+          resolvedItems = reconstructItemsFromProductName(sale.productName, articles, sale.totalAmount, sale.category);
+        }
+
+        // Legacy single-item fallback
+        if (resolvedItems.length === 0) {
+          resolvedItems = [{
+            id: 'legacy-' + sale.id,
+            articleId: sale.articleId || undefined,
+            productName: sale.productName || 'Artículo',
+            category: sale.category || 'Otros',
+            quantity: sale.quantity || 1,
+            unitPrice: sale.unitPrice || sale.totalAmount || 0,
+            totalPrice: sale.totalAmount || 0,
+            estimatedCost: sale.estimatedCost ? Math.round(sale.estimatedCost / (sale.quantity || 1)) : undefined,
+          }];
+        }
+      }
+
+      setSaleItems(resolvedItems);
+      setArticleSearchQuery('');
+      setIsArticleSelectorOpen(false);
+      setIsCustomProductMode(false);
+      setCustomItemName('');
+      setCustomItemCategory('Canastas');
+      setCustomItemUnitPrice('');
+      setCustomItemCost('');
+      setCustomItemQty('1');
+
+      const custName = (sale.customerName || '').trim();
+      setIsClientAssigned(custName.length > 0);
+      setClientSearchQuery('');
+      setClientMode('search');
+
+      const isCustomOrderVal = Boolean(sale.isCustomOrder);
+      const depositVal = (sale.depositAmount !== null && sale.depositAmount !== undefined)
+        ? String(sale.depositAmount)
+        : '';
+      const isFullyPaidVal = (sale.isFullyPaid !== null && sale.isFullyPaid !== undefined)
+        ? Boolean(sale.isFullyPaid)
+        : (!isCustomOrderVal);
+
+      const cleanNotes = (sale.notes || '').replace(ITEMS_TAG_REGEX, '').trim();
+
+      setFormData({
+        date: sale.date || new Date().toISOString().slice(0, 10),
+        paymentMethod: (sale.paymentMethod || 'Transferencia') as PaymentMethod,
+        customerName: custName,
+        customerPhone: (sale.customerPhone || '').trim(),
+        notes: cleanNotes,
+        isCustomOrder: isCustomOrderVal,
+        depositAmount: depositVal,
+        isFullyPaid: isFullyPaidVal,
+        deliveryDate: (sale.deliveryDate || '').trim(),
+      });
+      setIsModalOpen(true);
+    } catch (err) {
+      console.error('Error al abrir modal de edición de venta:', err);
     }
-    setArticleSearchQuery('');
-    setIsArticleSelectorOpen(false);
-    setIsCustomProductMode(false);
-    setCustomItemName('');
-    setCustomItemCategory('Canastas');
-    setCustomItemUnitPrice('');
-    setCustomItemCost('');
-    setCustomItemQty('1');
-    setIsClientAssigned(Boolean(sale.customerName && sale.customerName.trim().length > 0));
-    setClientSearchQuery('');
-    setClientMode('search');
-    setFormData({
-      date: sale.date,
-      paymentMethod: sale.paymentMethod,
-      customerName: sale.customerName || '',
-      customerPhone: sale.customerPhone || '',
-      notes: sale.notes || '',
-      isCustomOrder: Boolean(sale.isCustomOrder),
-      depositAmount: sale.depositAmount !== undefined ? sale.depositAmount.toString() : '',
-      isFullyPaid: sale.isFullyPaid !== undefined ? sale.isFullyPaid : (!sale.isCustomOrder),
-      deliveryDate: sale.deliveryDate || '',
-    });
-    setIsModalOpen(true);
   };
 
   const handleAddCatalogArticle = (article: Article) => {
@@ -343,6 +386,8 @@ export const SalesView: React.FC<SalesViewProps> = ({
       unitPrice = totalAmount;
     }
 
+    const cleanNotes = formData.notes.replace(ITEMS_TAG_REGEX, '').trim();
+
     const salePayload = {
       items: saleItems,
       articleId,
@@ -356,7 +401,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
       paymentMethod: formData.paymentMethod,
       customerName: formData.customerName.trim() || undefined,
       customerPhone: formData.customerPhone.trim() || undefined,
-      notes: formData.notes.trim() || undefined,
+      notes: cleanNotes || undefined,
       isCustomOrder: formData.isCustomOrder,
       depositAmount: formData.isCustomOrder ? (depositAmountNum || 0) : undefined,
       isFullyPaid: isFullyPaidVal,
@@ -374,10 +419,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   // Filtered sales
   const filteredSales = sales.filter(s => {
+    const cleanNotes = (s.notes || '').replace(ITEMS_TAG_REGEX, '').trim();
     const matchesSearch =
       s.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (s.customerName && s.customerName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (s.notes && s.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+      (cleanNotes && cleanNotes.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesCategory =
       selectedCategory === 'Todas' || s.category === selectedCategory;
@@ -672,9 +718,12 @@ export const SalesView: React.FC<SalesViewProps> = ({
                           Entrega est.: {formatDate(sale.deliveryDate)}
                         </p>
                       )}
-                      {sale.notes && (
-                        <p className="text-[11px] text-[#8E7E73] italic mt-0.5">{sale.notes}</p>
-                      )}
+                      {(() => {
+                        const cleanNote = (sale.notes || '').replace(ITEMS_TAG_REGEX, '').trim();
+                        return cleanNote ? (
+                          <p className="text-[11px] text-[#8E7E73] italic mt-0.5">{cleanNote}</p>
+                        ) : null;
+                      })()}
                       {sale.estimatedCost !== undefined && (
                         <p className="text-[10px] text-[#2E6B4A] font-semibold mt-0.5">
                           Margen est.: +{formatCurrency(sale.totalAmount - sale.estimatedCost)}
